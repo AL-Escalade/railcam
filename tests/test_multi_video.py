@@ -48,11 +48,11 @@ class TestVideoInput:
             VideoInput(path=Path("video.mp4"), start_frame=-1, end_frame=100)
 
     def test_end_before_start_raises(self):
-        with pytest.raises(InputParseError, match="End frame.*must be greater"):
+        with pytest.raises(InputParseError, match="End frame.*must be >"):
             VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=50)
 
     def test_end_equals_start_raises(self):
-        with pytest.raises(InputParseError, match="End frame.*must be greater"):
+        with pytest.raises(InputParseError, match="End frame.*must be >"):
             VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=100)
 
 
@@ -148,7 +148,7 @@ class TestParseInputSpec:
             parse_input_spec(":100:250")
 
     def test_invalid_frame_order_raises(self):
-        with pytest.raises(InputParseError, match="End frame.*must be greater"):
+        with pytest.raises(InputParseError, match="End frame.*must be >"):
             parse_input_spec("video.mp4:250:100")
 
     def test_invalid_selector_raises(self):
