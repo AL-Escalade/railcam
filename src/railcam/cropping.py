@@ -18,7 +18,7 @@ TORSO_HEIGHT_RATIO = 1 / 6
 
 # Zoom limits to prevent extreme values
 MIN_ZOOM_FACTOR = 0.5  # Allow zoom out (larger crop) if video dimensions permit
-MAX_ZOOM_FACTOR = 3.0
+MAX_ZOOM_FACTOR = 100.0  # Effectively unlimited
 
 
 @dataclass

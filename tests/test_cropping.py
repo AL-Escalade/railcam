@@ -162,7 +162,7 @@ class TestCalculateZoomFactor:
 
     def test_very_small_torso_clamps_to_max(self):
         # If torso is very small, zoom should be clamped to MAX_ZOOM_FACTOR
-        zoom = calculate_zoom_factor(TORSO_HEIGHT_RATIO / 10)
+        zoom = calculate_zoom_factor(TORSO_HEIGHT_RATIO / 200)
         assert zoom == MAX_ZOOM_FACTOR
 
     def test_zero_torso_returns_min(self):
