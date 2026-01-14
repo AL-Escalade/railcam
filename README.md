@@ -86,6 +86,7 @@ Development install:
 
 ```bash
 pip install -e ".[dev]"
+pre-commit install  # Auto-setup git hooks (LFS check, linting)
 ```
 
 ---

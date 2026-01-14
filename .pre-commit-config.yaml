@@ -1,0 +1,23 @@
+repos:
+  # Git LFS hooks
+  - repo: https://github.com/git-lfs/git-lfs
+    rev: v3.4.0
+    hooks:
+      - id: lfs-fsck  # Verify LFS files are valid pointers
+
+  # Local custom hooks
+  - repo: local
+    hooks:
+      - id: lfs-check
+        name: Check LFS patterns are pointers
+        entry: .githooks/pre-commit
+        language: script
+        stages: [pre-commit]
+
+  # Code quality (optional but recommended)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
