@@ -8,7 +8,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
+from ultralytics import YOLO, settings
 
 
 class ClimberSelector(Enum):
@@ -117,10 +117,12 @@ class PoseDetector:
         model_size: str = "m",  # n, s, m, l, x
     ) -> None:
         self.confidence_threshold = confidence_threshold
-        # Load YOLOv8-pose model (downloads automatically if not cached)
+        # Load YOLOv8-pose model from stable cache directory (not current working dir)
         model_name = f"yolov8{model_size}-pose.pt"
+        weights_dir = settings.get("weights_dir", "")
+        model_path = f"{weights_dir}/{model_name}" if weights_dir else model_name
         print(f"Loading YOLOv8-pose model ({model_name})...")
-        self._model = YOLO(model_name)
+        self._model = YOLO(model_path)
         print("Model loaded.")
 
     def _extract_person_from_keypoints(
