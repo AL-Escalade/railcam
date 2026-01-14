@@ -127,12 +127,14 @@ def crop_frame_with_padding(
     offset_x = (target_width - region.width) // 2
     offset_y = (target_height - region.height) // 2
 
-    padded[offset_y:offset_y + region.height, offset_x:offset_x + region.width] = cropped
+    padded[offset_y : offset_y + region.height, offset_x : offset_x + region.width] = cropped
 
     return padded
 
 
-def scale_frame(frame: np.ndarray, target_width: int | None, target_height: int | None) -> np.ndarray:
+def scale_frame(
+    frame: np.ndarray, target_width: int | None, target_height: int | None
+) -> np.ndarray:
     """Scale a frame to the target dimensions.
 
     If only one dimension is specified, the other is calculated to maintain aspect ratio.
@@ -282,9 +284,6 @@ def calculate_effective_torso_ratio(
     zoomed_width, zoomed_height = calculate_zoomed_crop_dimensions(
         video_width, video_height, zoom_factor
     )
-
-    # The torso height in pixels (approximate, based on source height)
-    torso_px = avg_torso_height * video_height
 
     # Convert to crop coordinates: torso might span a portion of the crop
     # The crop is zoomed_height tall, and the torso is still torso_px

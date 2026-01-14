@@ -28,7 +28,7 @@ class VideoInput:
             raise InputParseError(f"Start frame must be >= 0, got {self.start_frame}")
         if self.end_frame <= self.start_frame:
             raise InputParseError(
-                f"End frame ({self.end_frame}) must be greater than start frame ({self.start_frame})"
+                f"End frame ({self.end_frame}) must be > start frame ({self.start_frame})"
             )
 
 
@@ -51,8 +51,7 @@ def parse_climber_selector(selector_str: str) -> ClimberSelector:
         return ClimberSelector.RIGHT
     else:
         raise InputParseError(
-            f"Invalid climber selector: '{selector_str}'. "
-            f"Valid values are 'left' or 'right'."
+            f"Invalid climber selector: '{selector_str}'. Valid values are 'left' or 'right'."
         )
 
 
@@ -96,7 +95,7 @@ def parse_input_spec(spec: str) -> VideoInput:
         start_frame = int(start_str)
         end_frame = int(end_str)
     except ValueError as e:
-        raise InputParseError(f"Invalid frame number in '{spec}': {e}")
+        raise InputParseError(f"Invalid frame number in '{spec}': {e}") from e
 
     path = Path(path_str)
 

@@ -279,9 +279,7 @@ def compose_frames_horizontal(
 
     # Determine target height
     if target_height is None:
-        target_height = max(
-            frames[0].shape[0] for frames in frame_lists if len(frames) > 0
-        )
+        target_height = max(frames[0].shape[0] for frames in frame_lists if len(frames) > 0)
 
     # Ensure even height
     target_height = target_height - (target_height % 2)

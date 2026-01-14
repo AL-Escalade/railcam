@@ -19,16 +19,10 @@ from railcam.composition import (
     time_sync_frames,
 )
 from railcam.cropping import (
-    ASPECT_HEIGHT,
-    ASPECT_WIDTH,
     MAX_ZOOM_FACTOR,
     TORSO_HEIGHT_RATIO,
     calculate_average_torso_height,
     calculate_crop_dimensions,
-    calculate_crop_region,
-    calculate_zoomed_crop_dimensions,
-    crop_frame,
-    crop_frame_with_padding,
     scale_frame,
 )
 from railcam.multi_video import (
@@ -38,7 +32,6 @@ from railcam.multi_video import (
 )
 from railcam.output import (
     FFmpegNotFoundError,
-    OutputFormat,
     OutputGenerationError,
     generate_output,
     get_output_path,
@@ -49,7 +42,6 @@ from railcam.pose import (
     DetectionResult,
     PelvisPosition,
     PoseDetector,
-    draw_pose_overlay_on_crop,
     person_to_detection_result,
     select_climber,
 )
@@ -73,7 +65,9 @@ def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
         prog="railcam",
-        description="Generate cropped videos from speed climbing footage, tracking the climber's pelvis.",
+        description=(
+            "Generate cropped videos from speed climbing footage, tracking the climber's pelvis."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -120,45 +114,51 @@ Examples:
 
     # Multi-video mode
     parser.add_argument(
-        "-i", "--input",
+        "-i",
+        "--input",
         type=str,
         action="append",
         dest="inputs",
         metavar="PATH:START:END[:CLIMBER]",
         help="Video input specification (can be repeated for side-by-side). "
-             "Format: path:start_frame:end_frame[:left|right] "
-             "(e.g., video.mp4:100:250 or video.mp4:100:250:left)",
+        "Format: path:start_frame:end_frame[:left|right] "
+        "(e.g., video.mp4:100:250 or video.mp4:100:250:left)",
     )
 
     # Climber selection (for positional mode)
     parser.add_argument(
-        "-c", "--climber",
+        "-c",
+        "--climber",
         type=str,
         choices=["left", "right"],
         help="Which climber to track when video has multiple climbers (left or right). "
-             "For --input mode, append :left or :right to the input spec instead.",
+        "For --input mode, append :left or :right to the input spec instead.",
     )
 
     # Output options
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=Path,
         help="Output file path (default: <video_name>.<format> in current directory)",
     )
     parser.add_argument(
-        "-f", "--format",
+        "-f",
+        "--format",
         type=str,
         default="mp4",
         choices=["mp4", "gif"],
         help="Output format: mp4 (default) or gif",
     )
     parser.add_argument(
-        "-w", "--width",
+        "-w",
+        "--width",
         type=int,
         help="Output width in pixels (height calculated from 5:3 ratio)",
     )
     parser.add_argument(
-        "-H", "--height",
+        "-H",
+        "--height",
         type=int,
         help="Output height in pixels (width calculated from 5:3 ratio)",
     )
@@ -168,13 +168,15 @@ Examples:
         help="Enable debug mode with pose overlay visualization",
     )
     parser.add_argument(
-        "-s", "--speed",
+        "-s",
+        "--speed",
         type=float,
         default=1.0,
         help="Playback speed factor (0.5 = half speed/slow-mo, 2.0 = double speed). Default: 1.0",
     )
     parser.add_argument(
-        "-v", "--version",
+        "-v",
+        "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
@@ -196,8 +198,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
 
     if has_positional and has_inputs:
         print(
-            "Error: Cannot use both positional arguments and --input. "
-            "Choose one mode.",
+            "Error: Cannot use both positional arguments and --input. Choose one mode.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -226,12 +227,14 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
                 ClimberSelector.LEFT if args.climber == "left" else ClimberSelector.RIGHT
             )
 
-        return [VideoInput(
-            path=args.video,
-            start_frame=args.start_frame,
-            end_frame=args.end_frame,
-            climber_selector=climber_selector,
-        )]
+        return [
+            VideoInput(
+                path=args.video,
+                start_frame=args.start_frame,
+                end_frame=args.end_frame,
+                climber_selector=climber_selector,
+            )
+        ]
 
     # Multi-video mode
     if args.climber is not None:
@@ -445,7 +448,8 @@ def crop_video(
         scale_factor = 1.0
 
     print(f"  Source video: {analysis.video_width}x{analysis.video_height}")
-    print(f"  Avg torso in source: {analysis.avg_torso_height:.3f} ({analysis.avg_torso_height:.1%})")
+    avg_torso = analysis.avg_torso_height
+    print(f"  Avg torso in source: {avg_torso:.3f} ({avg_torso:.1%})")
     print(f"  Scale factor: {scale_factor:.2f}x (target torso: {target_torso_ratio:.1%})")
     print(f"  Output size: {output_width}x{output_height}")
 
@@ -457,7 +461,7 @@ def crop_video(
     # Check if we need padding (scaled frame smaller than output)
     needs_padding = scaled_width < output_width or scaled_height < output_height
     if needs_padding:
-        print(f"  Padding will be added (scaled frame smaller than output)")
+        print("  Padding will be added (scaled frame smaller than output)")
 
     # Calculate effective torso ratio
     torso_px_scaled = analysis.avg_torso_height * analysis.video_height * scale_factor
@@ -528,12 +532,10 @@ def crop_video(
             y = max(0, min(ideal_y, scaled_height - output_height))
             cropped = scaled_frame[y : y + output_height, x : x + output_width]
 
-        # Apply debug overlay if requested
-        if debug:
-            original_detection = analysis.detections_by_frame[pos.frame_num]
-            # Note: debug overlay needs adjustment for scaled coordinates
-            # For now, skip overlay in scaled mode (TODO: fix this)
-            pass
+        # TODO: Apply debug overlay (needs adjustment for scaled coordinates)
+        # if debug:
+        #     original_detection = analysis.detections_by_frame[pos.frame_num]
+        #     ...
 
         # Scale if requested
         if target_width is not None or target_height is not None:
@@ -617,16 +619,17 @@ def main(argv: list[str] | None = None) -> int:
                 # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
                 reference_torso = TORSO_HEIGHT_RATIO
 
-                print(f"\n=== Phase 2: Cropping with normalized zoom ===")
+                print("\n=== Phase 2: Cropping with normalized zoom ===")
                 print(f"  Target torso ratio: {reference_torso:.1%}")
 
                 # Info about videos needing padding (zoom out with black borders)
                 for i, analysis in enumerate(analyses):
                     if analysis.avg_torso_height > reference_torso:
-                        print(f"  Video {i+1}: torso ({analysis.avg_torso_height:.1%}) > target - will add black borders")
+                        torso_pct = analysis.avg_torso_height
+                        print(f"  Video {i + 1}: torso ({torso_pct:.1%}) > target - padding")
 
                 for i, (video_input, analysis) in enumerate(zip(video_inputs, analyses)):
-                    print(f"\nCropping video {i+1}: {video_input.path.name}")
+                    print(f"\nCropping video {i + 1}: {video_input.path.name}")
                     result = crop_video(
                         analysis,
                         reference_torso,
@@ -677,10 +680,11 @@ def main(argv: list[str] | None = None) -> int:
                 duration = durations[i]
                 # Show frame dimensions for debugging
                 frame_h, frame_w = result.cropped_frames[0].shape[:2]
-                if duration < max_duration:
-                    print(f"  Video {i+1}: {frame_w}x{frame_h}, {duration:.2f}s @ {result.fps:.1f}fps (freezes)")
-                else:
-                    print(f"  Video {i+1}: {frame_w}x{frame_h}, {duration:.2f}s @ {result.fps:.1f}fps")
+                fps = result.fps
+                freeze = " (freezes)" if duration < max_duration else ""
+                print(
+                    f"  Video {i + 1}: {frame_w}x{frame_h}, {duration:.2f}s @ {fps:.1f}fps{freeze}"
+                )
 
             # Compose side-by-side
             print("  Composing frames horizontally...")
@@ -689,9 +693,7 @@ def main(argv: list[str] | None = None) -> int:
             # Scale if requested
             if args.width is not None or args.height is not None:
                 print("  Scaling output...")
-                output_frames = [
-                    scale_frame(f, args.width, args.height) for f in output_frames
-                ]
+                output_frames = [scale_frame(f, args.width, args.height) for f in output_frames]
 
             # Use output FPS (max of all videos)
             avg_fps = output_fps

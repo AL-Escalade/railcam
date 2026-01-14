@@ -2,14 +2,13 @@
 
 import pytest
 
-from railcam.pose import PelvisPosition
+from railcam.pose import DetectionResult, PelvisPosition
 from railcam.processing import (
     NoValidDetectionsError,
     ProcessedPosition,
     interpolate_positions,
     smooth_positions,
 )
-from railcam.pose import DetectionResult
 
 
 class TestInterpolatePositions:
@@ -87,13 +86,13 @@ class TestInterpolatePositions:
         assert result[0].interpolated is False
 
         # Frame 1: t = 1/3
-        assert abs(result[1].x - 1/3) < 0.001
-        assert abs(result[1].y - 1/3) < 0.001
+        assert abs(result[1].x - 1 / 3) < 0.001
+        assert abs(result[1].y - 1 / 3) < 0.001
         assert result[1].interpolated is True
 
         # Frame 2: t = 2/3
-        assert abs(result[2].x - 2/3) < 0.001
-        assert abs(result[2].y - 2/3) < 0.001
+        assert abs(result[2].x - 2 / 3) < 0.001
+        assert abs(result[2].y - 2 / 3) < 0.001
         assert result[2].interpolated is True
 
         assert result[3].x == 1.0

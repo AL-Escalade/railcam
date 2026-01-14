@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from railcam.pose import (
     ClimberSelector,
     PelvisPosition,
@@ -35,62 +33,38 @@ class TestSelectClimber:
         assert result is None
 
     def test_single_person_returns_that_person(self) -> None:
-        person = PersonDetection(
-            pelvis=PelvisPosition(x=0.3, y=0.5, confidence=0.9)
-        )
+        person = PersonDetection(pelvis=PelvisPosition(x=0.3, y=0.5, confidence=0.9))
         result = select_climber([person], ClimberSelector.LEFT)
         assert result is person
 
     def test_single_person_ignores_selector(self) -> None:
-        person = PersonDetection(
-            pelvis=PelvisPosition(x=0.3, y=0.5, confidence=0.9)
-        )
+        person = PersonDetection(pelvis=PelvisPosition(x=0.3, y=0.5, confidence=0.9))
         # Even with RIGHT selector, single person is returned
         result = select_climber([person], ClimberSelector.RIGHT)
         assert result is person
 
     def test_left_selector_returns_leftmost(self) -> None:
-        left_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9)
-        )
-        right_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9)
-        )
+        left_person = PersonDetection(pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9))
+        right_person = PersonDetection(pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9))
         result = select_climber([left_person, right_person], ClimberSelector.LEFT)
         assert result is left_person
 
     def test_right_selector_returns_rightmost(self) -> None:
-        left_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9)
-        )
-        right_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9)
-        )
+        left_person = PersonDetection(pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9))
+        right_person = PersonDetection(pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9))
         result = select_climber([left_person, right_person], ClimberSelector.RIGHT)
         assert result is right_person
 
     def test_auto_selector_returns_closest_to_center(self) -> None:
-        left_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9)
-        )
-        center_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.45, y=0.5, confidence=0.9)
-        )
-        right_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9)
-        )
-        result = select_climber(
-            [left_person, center_person, right_person], ClimberSelector.AUTO
-        )
+        left_person = PersonDetection(pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9))
+        center_person = PersonDetection(pelvis=PelvisPosition(x=0.45, y=0.5, confidence=0.9))
+        right_person = PersonDetection(pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9))
+        result = select_climber([left_person, center_person, right_person], ClimberSelector.AUTO)
         assert result is center_person
 
     def test_proximity_tracking_overrides_selector(self) -> None:
-        left_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9)
-        )
-        right_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9)
-        )
+        left_person = PersonDetection(pelvis=PelvisPosition(x=0.2, y=0.5, confidence=0.9))
+        right_person = PersonDetection(pelvis=PelvisPosition(x=0.8, y=0.5, confidence=0.9))
         # Previous position was on the right
         previous_pos = PelvisPosition(x=0.75, y=0.5, confidence=0.9)
 
@@ -103,12 +77,8 @@ class TestSelectClimber:
         assert result is right_person
 
     def test_proximity_tracking_considers_y_coordinate(self) -> None:
-        top_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.5, y=0.2, confidence=0.9)
-        )
-        bottom_person = PersonDetection(
-            pelvis=PelvisPosition(x=0.5, y=0.8, confidence=0.9)
-        )
+        top_person = PersonDetection(pelvis=PelvisPosition(x=0.5, y=0.2, confidence=0.9))
+        bottom_person = PersonDetection(pelvis=PelvisPosition(x=0.5, y=0.8, confidence=0.9))
         # Previous position was at the top
         previous_pos = PelvisPosition(x=0.5, y=0.25, confidence=0.9)
 
@@ -157,9 +127,7 @@ class TestPersonToDetectionResult:
         assert result.landmarks == []
 
     def test_person_with_pelvis_only(self) -> None:
-        person = PersonDetection(
-            pelvis=PelvisPosition(x=0.5, y=0.6, confidence=0.85)
-        )
+        person = PersonDetection(pelvis=PelvisPosition(x=0.5, y=0.6, confidence=0.85))
         result = person_to_detection_result(person, frame_num=10)
         assert result.frame_num == 10
         assert result.position is not None
