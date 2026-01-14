@@ -21,6 +21,7 @@ from railcam.composition import (
 from railcam.cropping import (
     MAX_ZOOM_FACTOR,
     TORSO_HEIGHT_RATIO,
+    CropRegion,
     calculate_average_torso_height,
     calculate_crop_dimensions,
     scale_frame,
@@ -42,6 +43,7 @@ from railcam.pose import (
     DetectionResult,
     PelvisPosition,
     PoseDetector,
+    draw_pose_overlay_on_crop,
     person_to_detection_result,
     select_climber,
 )
@@ -532,10 +534,25 @@ def crop_video(
             y = max(0, min(ideal_y, scaled_height - output_height))
             cropped = scaled_frame[y : y + output_height, x : x + output_width]
 
-        # TODO: Apply debug overlay (needs adjustment for scaled coordinates)
-        # if debug:
-        #     original_detection = analysis.detections_by_frame[pos.frame_num]
-        #     ...
+        # Apply debug overlay with scaled coordinates
+        if debug:
+            original_detection = analysis.detections_by_frame[pos.frame_num]
+            # Create a CropRegion in scaled space for coordinate transformation
+            if needs_padding:
+                # For padding case, use ideal coordinates (may be negative)
+                crop_region = CropRegion(
+                    x=ideal_x, y=ideal_y, width=output_width, height=output_height
+                )
+            else:
+                crop_region = CropRegion(x=x, y=y, width=output_width, height=output_height)
+            # Draw overlay using scaled dimensions as reference
+            cropped = draw_pose_overlay_on_crop(
+                cropped,
+                original_detection,
+                crop_region,
+                scaled_width,
+                scaled_height,
+            )
 
         # Scale if requested
         if target_width is not None or target_height is not None:
