@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from railcam.pose import DetectionResult, PelvisPosition
+from railcam.pose import DetectionResult
 
 DEFAULT_SMOOTHING_ALPHA = 0.3
 

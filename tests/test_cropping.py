@@ -1,17 +1,16 @@
 """Tests for cropping module."""
 
 import numpy as np
-import pytest
 
 from railcam.cropping import (
-    MIN_ZOOM_FACTOR,
     MAX_ZOOM_FACTOR,
+    MIN_ZOOM_FACTOR,
     TORSO_HEIGHT_RATIO,
+    calculate_average_torso_height,
     calculate_crop_dimensions,
     calculate_crop_region,
     calculate_zoom_factor,
     calculate_zoomed_crop_dimensions,
-    calculate_average_torso_height,
     crop_frame,
 )
 from railcam.processing import ProcessedPosition
@@ -27,7 +26,7 @@ class TestCalculateCropDimensions:
         # Width should be height * 3/5 = 648
         assert width == 648
         # Check ratio
-        assert abs(width / height - 3/5) < 0.01
+        assert abs(width / height - 3 / 5) < 0.01
 
     def test_taller_video_uses_full_width(self):
         # 1080x1920 (9:16) video -> width limited
@@ -38,7 +37,7 @@ class TestCalculateCropDimensions:
         # Height should be width * 5/3 = 1800
         assert height == 1800
         # Check ratio
-        assert abs(width / height - 3/5) < 0.01
+        assert abs(width / height - 3 / 5) < 0.01
 
     def test_exact_ratio_video(self):
         # Video already at 3:5 ratio
@@ -134,6 +133,7 @@ class TestCropFrame:
         frame[25:75, 50:150, 0] = 255  # Red region
 
         from railcam.cropping import CropRegion
+
         region = CropRegion(x=50, y=25, width=100, height=50)
         cropped = crop_frame(frame, region)
 
@@ -197,7 +197,7 @@ class TestCalculateZoomedCropDimensions:
     def test_zoom_maintains_aspect_ratio(self):
         # Zoomed dimensions should maintain 5:3 vertical ratio
         zoomed_w, zoomed_h = calculate_zoomed_crop_dimensions(1920, 1080, 1.5)
-        assert abs(zoomed_w / zoomed_h - 3/5) < 0.02
+        assert abs(zoomed_w / zoomed_h - 3 / 5) < 0.02
 
     def test_dimensions_are_even(self):
         zoomed_w, zoomed_h = calculate_zoomed_crop_dimensions(1920, 1080, 1.7)

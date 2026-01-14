@@ -18,6 +18,7 @@ class ClimberSelector(Enum):
     RIGHT = "right"
     AUTO = "auto"  # Single climber or closest to center
 
+
 # Confidence threshold for hip visibility
 CONFIDENCE_THRESHOLD = 0.3
 
@@ -37,17 +38,25 @@ RIGHT_HIP = 12
 # Pose skeleton connections for visualization (COCO format)
 POSE_CONNECTIONS = [
     # Face
-    (0, 1), (0, 2), (1, 3), (2, 4),  # Nose to eyes to ears
+    (0, 1),
+    (0, 2),
+    (1, 3),
+    (2, 4),  # Nose to eyes to ears
     # Arms
-    (5, 7), (7, 9),    # Left arm
-    (6, 8), (8, 10),   # Right arm
+    (5, 7),
+    (7, 9),  # Left arm
+    (6, 8),
+    (8, 10),  # Right arm
     # Torso
-    (5, 6),            # Shoulders
-    (5, 11), (6, 12),  # Shoulders to hips
-    (11, 12),          # Hips
+    (5, 6),  # Shoulders
+    (5, 11),
+    (6, 12),  # Shoulders to hips
+    (11, 12),  # Hips
     # Legs
-    (11, 13), (13, 15),  # Left leg
-    (12, 14), (14, 16),  # Right leg
+    (11, 13),
+    (13, 15),  # Left leg
+    (12, 14),
+    (14, 16),  # Right leg
 ]
 
 
@@ -76,7 +85,8 @@ class PersonDetection:
 
     pelvis: PelvisPosition
     torso: TorsoMeasurement | None = None
-    landmarks: list[tuple[float, float, float]] = field(default_factory=list)  # (x, y, conf) normalized
+    # Landmarks: (x, y, conf) normalized
+    landmarks: list[tuple[float, float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -94,7 +104,8 @@ class DetectionResult:
     frame_num: int
     position: PelvisPosition | None  # None if detection failed
     torso: TorsoMeasurement | None = None  # None if torso measurement failed
-    landmarks: list[tuple[float, float, float]] = field(default_factory=list)  # (x, y, conf) normalized
+    # Landmarks: (x, y, conf) normalized
+    landmarks: list[tuple[float, float, float]] = field(default_factory=list)
 
 
 class PoseDetector:
@@ -143,17 +154,15 @@ class PoseDetector:
         # Extract hip positions
         left_hip_xy = xy[LEFT_HIP]
         right_hip_xy = xy[RIGHT_HIP]
-        left_hip_conf = conf[LEFT_HIP] if LEFT_HIP < len(conf) else 0.0
-        right_hip_conf = conf[RIGHT_HIP] if RIGHT_HIP < len(conf) else 0.0
+        left_hip_conf = conf[LEFT_HIP] if len(conf) > LEFT_HIP else 0.0
+        right_hip_conf = conf[RIGHT_HIP] if len(conf) > RIGHT_HIP else 0.0
 
         # Check hip visibility - at least one hip must be visible
-        left_hip_valid = (
-            left_hip_conf >= self.confidence_threshold
-            and (left_hip_xy[0] > 0 or left_hip_xy[1] > 0)
+        left_hip_valid = left_hip_conf >= self.confidence_threshold and (
+            left_hip_xy[0] > 0 or left_hip_xy[1] > 0
         )
-        right_hip_valid = (
-            right_hip_conf >= self.confidence_threshold
-            and (right_hip_xy[0] > 0 or right_hip_xy[1] > 0)
+        right_hip_valid = right_hip_conf >= self.confidence_threshold and (
+            right_hip_xy[0] > 0 or right_hip_xy[1] > 0
         )
 
         # No valid hip detected - skip this person
@@ -174,9 +183,7 @@ class PoseDetector:
             py = right_hip_xy[1]
             hip_confidence = right_hip_conf
 
-        pelvis = PelvisPosition(
-            x=px / width, y=py / height, confidence=float(hip_confidence)
-        )
+        pelvis = PelvisPosition(x=px / width, y=py / height, confidence=float(hip_confidence))
         hip_y_norm = py / height
 
         # Build normalized landmarks list
@@ -220,16 +227,14 @@ class PoseDetector:
         """
         left_shoulder_xy = xy[LEFT_SHOULDER]
         right_shoulder_xy = xy[RIGHT_SHOULDER]
-        left_shoulder_conf = conf[LEFT_SHOULDER] if LEFT_SHOULDER < len(conf) else 0.0
-        right_shoulder_conf = conf[RIGHT_SHOULDER] if RIGHT_SHOULDER < len(conf) else 0.0
+        left_shoulder_conf = conf[LEFT_SHOULDER] if len(conf) > LEFT_SHOULDER else 0.0
+        right_shoulder_conf = conf[RIGHT_SHOULDER] if len(conf) > RIGHT_SHOULDER else 0.0
 
-        left_shoulder_valid = (
-            left_shoulder_conf >= self.confidence_threshold
-            and (left_shoulder_xy[0] > 0 or left_shoulder_xy[1] > 0)
+        left_shoulder_valid = left_shoulder_conf >= self.confidence_threshold and (
+            left_shoulder_xy[0] > 0 or left_shoulder_xy[1] > 0
         )
-        right_shoulder_valid = (
-            right_shoulder_conf >= self.confidence_threshold
-            and (right_shoulder_xy[0] > 0 or right_shoulder_xy[1] > 0)
+        right_shoulder_valid = right_shoulder_conf >= self.confidence_threshold and (
+            right_shoulder_xy[0] > 0 or right_shoulder_xy[1] > 0
         )
 
         shoulder_y_norm: float | None = None
@@ -295,9 +300,7 @@ class PoseDetector:
             landmarks=person.landmarks,
         )
 
-    def detect_all_persons(
-        self, frame: np.ndarray, frame_num: int
-    ) -> MultiPersonDetectionResult:
+    def detect_all_persons(self, frame: np.ndarray, frame_num: int) -> MultiPersonDetectionResult:
         """Detect all persons with valid pelvis in a frame.
 
         Only returns persons whose hip landmarks are detected with sufficient confidence.
@@ -338,7 +341,7 @@ class PoseDetector:
         """Release resources."""
         pass  # YOLO handles cleanup automatically
 
-    def __enter__(self) -> "PoseDetector":
+    def __enter__(self) -> PoseDetector:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -373,8 +376,7 @@ def select_climber(
         return min(
             persons,
             key=lambda p: (
-                (p.pelvis.x - previous_position.x) ** 2
-                + (p.pelvis.y - previous_position.y) ** 2
+                (p.pelvis.x - previous_position.x) ** 2 + (p.pelvis.y - previous_position.y) ** 2
             ),
         )
 
@@ -390,9 +392,7 @@ def select_climber(
         return min(persons, key=lambda p: abs(p.pelvis.x - FRAME_CENTER_X))
 
 
-def person_to_detection_result(
-    person: PersonDetection | None, frame_num: int
-) -> DetectionResult:
+def person_to_detection_result(person: PersonDetection | None, frame_num: int) -> DetectionResult:
     """Convert a PersonDetection to DetectionResult format.
 
     Args:
@@ -463,13 +463,11 @@ def draw_pose_overlay_on_crop(
             if start_pt is not None and end_pt is not None:
                 cv2.line(overlay, start_pt, end_pt, color, 2, cv2.LINE_AA)
 
-    # Draw landmark points
+    # Draw landmark points (only if within visible area)
     for pt in points:
-        if pt is not None:
-            # Only draw if within visible area
-            if 0 <= pt[0] < crop_w and 0 <= pt[1] < crop_h:
-                cv2.circle(overlay, pt, 4, color, -1, cv2.LINE_AA)
-                cv2.circle(overlay, pt, 6, color, 1, cv2.LINE_AA)
+        if pt is not None and 0 <= pt[0] < crop_w and 0 <= pt[1] < crop_h:
+            cv2.circle(overlay, pt, 4, color, -1, cv2.LINE_AA)
+            cv2.circle(overlay, pt, 6, color, 1, cv2.LINE_AA)
 
     # Draw pelvis position with a larger marker
     if detection.position is not None:

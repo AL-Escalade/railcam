@@ -93,9 +93,12 @@ def generate_gif(
         palette_cmd = [
             "ffmpeg",
             "-y",
-            "-framerate", str(fps),
-            "-i", str(frame_pattern),
-            "-vf", "palettegen=stats_mode=diff",
+            "-framerate",
+            str(fps),
+            "-i",
+            str(frame_pattern),
+            "-vf",
+            "palettegen=stats_mode=diff",
             str(palette_path),
         ]
 
@@ -114,10 +117,14 @@ def generate_gif(
         gif_cmd = [
             "ffmpeg",
             "-y",
-            "-framerate", str(fps),
-            "-i", str(frame_pattern),
-            "-i", str(palette_path),
-            "-lavfi", "paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "-framerate",
+            str(fps),
+            "-i",
+            str(frame_pattern),
+            "-i",
+            str(palette_path),
+            "-lavfi",
+            "paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
             str(output_path),
         ]
 
@@ -162,12 +169,18 @@ def generate_mp4(
         mp4_cmd = [
             "ffmpeg",
             "-y",
-            "-framerate", str(fps),
-            "-i", str(frame_pattern),
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",
+            "-framerate",
+            str(fps),
+            "-i",
+            str(frame_pattern),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
             str(output_path),
         ]
 
@@ -240,6 +253,6 @@ def parse_output_format(format_str: str) -> OutputFormat:
     """
     try:
         return OutputFormat(format_str.lower())
-    except ValueError:
+    except ValueError as e:
         supported = ", ".join(f.value for f in OutputFormat)
-        raise ValueError(f"Unsupported format '{format_str}'. Supported formats: {supported}")
+        raise ValueError(f"Unsupported format '{format_str}'. Supported: {supported}") from e

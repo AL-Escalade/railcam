@@ -163,11 +163,13 @@ class TestParseMultipleInputs:
         assert inputs[0].path == Path("video.mp4")
 
     def test_multiple_inputs(self):
-        inputs = parse_multiple_inputs([
-            "video1.mp4:100:250",
-            "video2.mp4:50:200",
-            "video3.mp4:0:150",
-        ])
+        inputs = parse_multiple_inputs(
+            [
+                "video1.mp4:100:250",
+                "video2.mp4:50:200",
+                "video3.mp4:0:150",
+            ]
+        )
         assert len(inputs) == 3
         assert inputs[0].path == Path("video1.mp4")
         assert inputs[1].path == Path("video2.mp4")
