@@ -61,6 +61,9 @@ Thumbs.db
 *.gif
 *.mp4
 
+# Exception: keep example assets in docs/
+!docs/*.gif
+
 # Temporary files
 tmp/
 temp/
