@@ -2,8 +2,51 @@
 
 from __future__ import annotations
 
+import math
+
 import cv2
 import numpy as np
+
+
+def calculate_output_fps(fps_list: list[float]) -> float:
+    """Calculate optimal output FPS using LCM (Least Common Multiple).
+
+    Using the LCM ensures that each source frame is displayed an exact integer
+    number of times, avoiding judder caused by irregular frame duplication.
+    This is especially important for slow-motion playback where timing
+    irregularities become more visible.
+
+    Args:
+        fps_list: List of FPS values for each video.
+
+    Returns:
+        Output FPS (LCM of all input FPS values, rounded to integers).
+
+    Raises:
+        ValueError: If the list is empty or contains non-positive values.
+
+    Example:
+        >>> calculate_output_fps([60.0, 30.0, 25.0])
+        300.0
+        >>> calculate_output_fps([30.0, 24.0])
+        120.0
+    """
+    if not fps_list:
+        raise ValueError("At least one FPS value is required")
+
+    # Round FPS to integers for LCM calculation
+    # (handles cases like 29.97fps → 30fps)
+    int_fps_list = [round(fps) for fps in fps_list]
+
+    if any(fps <= 0 for fps in int_fps_list):
+        raise ValueError("All FPS values must be positive")
+
+    # Calculate LCM of all FPS values
+    result = int_fps_list[0]
+    for fps in int_fps_list[1:]:
+        result = math.lcm(result, fps)
+
+    return float(result)
 
 
 def calculate_target_frame_count(frame_counts: list[int]) -> int:

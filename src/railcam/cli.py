@@ -15,6 +15,7 @@ from railcam import __version__
 from railcam.composition import (
     calculate_duration,
     calculate_max_duration,
+    calculate_output_fps,
     compose_frames_horizontal,
     time_sync_frames,
 )
@@ -676,12 +677,13 @@ def main(argv: list[str] | None = None) -> int:
             durations = [calculate_duration(fc, fps) for fc, fps in zip(frame_counts, fps_list)]
             max_duration = calculate_max_duration(frame_counts, fps_list)
 
-            # Use max FPS for output (smoother result)
-            output_fps = max(fps_list)
+            # Use LCM of all FPS for perfect frame timing (no judder in slow-motion)
+            output_fps = calculate_output_fps(fps_list)
             target_frame_count = int(max_duration * output_fps)
 
             print(f"  Max duration: {max_duration:.2f}s")
-            print(f"  Output FPS: {output_fps:.2f}")
+            fps_str = ", ".join(f"{f:.0f}" for f in fps_list)
+            print(f"  Output FPS: {output_fps:.0f} (LCM of {fps_str})")
             print(f"  Target frame count: {target_frame_count}")
 
             # Time-sync each video (freeze on last frame when source ends)
