@@ -82,10 +82,16 @@ sudo apt install ffmpeg
 pip install .
 ```
 
+With the desktop GUI (see below):
+
+```bash
+pip install ".[gui]"
+```
+
 Development install:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,gui]"
 pre-commit install  # Auto-setup git hooks (LFS check, linting)
 ```
 
@@ -105,6 +111,29 @@ railcam \
   --input video.mp4:100:250:left \
   --input video.mp4:100:250:right
 ```
+
+---
+
+## Desktop GUI
+
+Prefer picking frames visually? Install the `gui` extra and run:
+
+```bash
+railcam-gui
+```
+
+The GUI lets you:
+
+- Load one or more videos side by side and scrub them frame by frame
+  (arrow keys: ±1 frame, Shift+arrows: ±10)
+- Set each video's start/end frame from the displayed image — start frames
+  are the synchronization points (t=0), exactly like the CLI
+- Choose the climber (auto/left/right) per video
+- Play all videos synchronized in slow motion (space bar to play/pause)
+  to check the timing before rendering
+- Configure render options, see the equivalent CLI command live (copyable),
+  and launch the render with a progress bar
+- Save and reopen sessions as `.railcam.json` project files
 
 ---
 
