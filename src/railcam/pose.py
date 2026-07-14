@@ -22,8 +22,6 @@ class ClimberSelector(Enum):
 # Confidence threshold for hip visibility
 CONFIDENCE_THRESHOLD = 0.3
 
-# Normalized X coordinate representing frame center (for AUTO climber selection)
-FRAME_CENTER_X = 0.5
 
 # YOLOv8 pose keypoint indices (COCO format)
 # 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
@@ -350,69 +348,8 @@ class PoseDetector:
         self.close()
 
 
-def select_climber(
-    persons: list[PersonDetection],
-    selector: ClimberSelector,
-    previous_position: PelvisPosition | None = None,
-) -> PersonDetection | None:
-    """Select a climber from detected persons based on selector and tracking.
-
-    Args:
-        persons: List of detected persons with valid pelvis.
-        selector: Which climber to select (LEFT, RIGHT, AUTO).
-        previous_position: Previous pelvis position for proximity tracking.
-
-    Returns:
-        The selected PersonDetection, or None if no valid person found.
-    """
-    if not persons:
-        return None
-
-    if len(persons) == 1:
-        # Only one person - return them regardless of selector
-        return persons[0]
-
-    # Multiple persons detected
-    if previous_position is not None:
-        # Proximity tracking: select person closest to previous position
-        return min(
-            persons,
-            key=lambda p: (
-                (p.pelvis.x - previous_position.x) ** 2 + (p.pelvis.y - previous_position.y) ** 2
-            ),
-        )
-
-    # Initial selection based on selector
-    if selector == ClimberSelector.LEFT:
-        # Leftmost person (smallest X)
-        return min(persons, key=lambda p: p.pelvis.x)
-    elif selector == ClimberSelector.RIGHT:
-        # Rightmost person (largest X)
-        return max(persons, key=lambda p: p.pelvis.x)
-    else:
-        # AUTO: closest to center
-        return min(persons, key=lambda p: abs(p.pelvis.x - FRAME_CENTER_X))
-
-
-def person_to_detection_result(person: PersonDetection | None, frame_num: int) -> DetectionResult:
-    """Convert a PersonDetection to DetectionResult format.
-
-    Args:
-        person: The person detection (may be None).
-        frame_num: The frame number.
-
-    Returns:
-        DetectionResult compatible with existing code.
-    """
-    if person is None:
-        return DetectionResult(frame_num=frame_num, position=None, torso=None, landmarks=[])
-
-    return DetectionResult(
-        frame_num=frame_num,
-        position=person.pelvis,
-        torso=person.torso,
-        landmarks=person.landmarks,
-    )
+# Climber selection is motion-based and lives in railcam.tracking:
+# per-frame detections are grouped into tracks, static persons filtered out.
 
 
 # Fluorescent green color (BGR format)
