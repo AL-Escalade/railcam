@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeyEvent, QPixmap, QResizeEvent
+from PySide6.QtCore import QPointF, QRect, Qt, Signal
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -22,6 +22,7 @@ from railcam.gui.frame_source import FrameSource
 from railcam.gui.imaging import frame_to_qimage
 from railcam.gui.project import VideoEntry
 from railcam.gui.timeline import TimelineWidget
+from railcam.gui.viewport import Viewport
 
 _STEP_SMALL = 1
 _STEP_LARGE = 10
@@ -30,15 +31,23 @@ CLIMBER_LABELS = [("auto", "Auto"), ("left", "Gauche"), ("right", "Droite")]
 
 
 class FrameDisplay(QLabel):
-    """Displays the current frame scaled to fit while keeping aspect ratio."""
+    """Displays the current frame scaled to fit, with wheel zoom and drag pan.
+
+    Wheel zooms towards the cursor, dragging pans while zoomed, and a
+    double-click resets the view. The view persists across frame changes so
+    a detail can be watched while stepping through frames.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
+        self.viewport_state = Viewport()
+        self._drag_pos: QPointF | None = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(240, 180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setObjectName("frameDisplay")
+        self.setToolTip("Molette : zoom · Glisser : déplacer · Double-clic : réinitialiser")
 
     def set_frame_pixmap(self, pixmap: QPixmap) -> None:
         self._pixmap = pixmap
@@ -48,16 +57,87 @@ class FrameDisplay(QLabel):
         super().resizeEvent(event)
         self._rescale()
 
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._pixmap is None:
+            return
+        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+        anchor = self._anchor_from(event.position())
+        if anchor is not None:
+            self.viewport_state.zoom_at(factor, *anchor)
+            self._rescale()
+            self._update_cursor()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self.viewport_state.is_zoomed and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag_pos is None:
+            return
+        displayed = self._displayed_rect()
+        if displayed is None:
+            return
+        delta = event.position() - self._drag_pos
+        self._drag_pos = event.position()
+        # Content follows the cursor: the view window moves the opposite way
+        self.viewport_state.pan_view(
+            -delta.x() / displayed.width(), -delta.y() / displayed.height()
+        )
+        self._rescale()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_pos = None
+        self._update_cursor()
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        self.viewport_state.reset()
+        self._rescale()
+        self._update_cursor()
+
     def _rescale(self) -> None:
         if self._pixmap is None:
             return
+        x, y, view_w, view_h = self.viewport_state.visible_rect(
+            self._pixmap.width(), self._pixmap.height()
+        )
+        visible = self._pixmap.copy(QRect(round(x), round(y), round(view_w), round(view_h)))
         self.setPixmap(
-            self._pixmap.scaled(
+            visible.scaled(
                 self.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+
+    def _displayed_rect(self) -> QRect | None:
+        """Rect of the drawn pixmap within the label (it is centered)."""
+        pixmap = self.pixmap()
+        if pixmap is None or pixmap.isNull():
+            return None
+        return QRect(
+            (self.width() - pixmap.width()) // 2,
+            (self.height() - pixmap.height()) // 2,
+            pixmap.width(),
+            pixmap.height(),
+        )
+
+    def _anchor_from(self, pos: QPointF) -> tuple[float, float] | None:
+        """Cursor position as normalized coordinates of the displayed image."""
+        displayed = self._displayed_rect()
+        if displayed is None or displayed.width() == 0 or displayed.height() == 0:
+            return None
+        anchor_x = (pos.x() - displayed.x()) / displayed.width()
+        anchor_y = (pos.y() - displayed.y()) / displayed.height()
+        return min(max(anchor_x, 0.0), 1.0), min(max(anchor_y, 0.0), 1.0)
+
+    def _update_cursor(self) -> None:
+        if self.viewport_state.is_zoomed:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
 
 
 class PlayerWidget(QFrame):

@@ -14,6 +14,9 @@
 - [x] 2.3 Implement `gui/main_window.py`: toolbar (open/save project, add video), side-by-side player grid, remove video
 - [x] 2.4 Dark theme (`style.qss`) applied in `gui/app.py`
 
+- [x] 2.5 View zoom and pan per player: pure viewport math + unit tests, wheel zoom at
+      cursor, drag pan, double-click reset, persistent across frame navigation
+
 ## 3. Synchronized playback
 
 - [x] 3.1 Implement `gui/playback.py`: common clock, time→frame mapping per video, freeze at end frame + unit tests (different FPS, freeze)

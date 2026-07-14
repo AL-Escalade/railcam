@@ -49,6 +49,33 @@ Each player SHALL provide frame-accurate navigation: a scrubbable timeline and k
 - **WHEN** the user presses an arrow key on a focused player
 - **THEN** the displayed frame SHALL advance or rewind by exactly one frame, clamped to the video bounds
 
+### Requirement: View Zoom and Pan
+
+Each player SHALL allow zooming into the displayed frame (mouse wheel, centered on the
+cursor) and panning the zoomed view (mouse drag), independently per video, so the user
+can inspect a detail while stepping through frames. A double-click SHALL reset the view
+to fit. The zoom and pan SHALL persist across frame navigation and preview playback.
+
+#### Scenario: Zoom towards the cursor
+
+- **WHEN** the user scrolls the mouse wheel over the frame display
+- **THEN** the view SHALL zoom in or out keeping the point under the cursor stationary
+
+#### Scenario: Pan while zoomed
+
+- **WHEN** the view is zoomed in and the user drags the frame display
+- **THEN** the visible region SHALL follow the drag, clamped to the frame bounds
+
+#### Scenario: View persists across frames
+
+- **WHEN** the user steps to another frame or plays synchronized preview while zoomed
+- **THEN** the same zoomed region SHALL remain displayed for the new frames
+
+#### Scenario: Reset the view
+
+- **WHEN** the user double-clicks the frame display
+- **THEN** the view SHALL return to fitting the whole frame
+
 ### Requirement: Frame Range Selection
 
 Each player SHALL let the user set the start and end frames from the currently displayed frame, visually highlighting the selected range on the timeline.

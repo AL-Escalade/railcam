@@ -231,13 +231,19 @@ class RenderPanel(QWidget):
         ready = not problems and not self._process.running
         self.render_button.setEnabled(ready)
         self.validity_label.setText(" · ".join(problems))
+        # Show the actual default output path so it is obvious what "auto" means
+        if not self.output_edit.text().strip():
+            default = self.output_path(project)
+            self.output_edit.setPlaceholderText(str(default) if default else "auto")
 
     # --- Actions ---------------------------------------------------------------
 
     def _browse_output(self) -> None:
         extension = self.render_options().format
+        current = self.output_path(self._project_provider())
+        suggestion = str(current) if current else f"comparison.{extension}"
         file_name, _ = QFileDialog.getSaveFileName(
-            self, "Fichier de sortie", f"comparison.{extension}", f"*.{extension}"
+            self, "Fichier de sortie", suggestion, f"*.{extension}"
         )
         if file_name:
             self.output_edit.setText(file_name)
