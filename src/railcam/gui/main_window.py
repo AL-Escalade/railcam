@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from railcam.gui.player_widget import PlayerWidget
-from railcam.gui.project import Project, ProjectError, RenderOptions
+from railcam.gui.project import Project, ProjectError
+from railcam.gui.render_panel import RenderPanel
 from railcam.gui.transport import SyncPlayback, TransportBar
 from railcam.video import VideoError
 
@@ -37,8 +38,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("railcam")
         self.resize(1200, 800)
         self._project_path: Path | None = None
-        self._render_options = RenderOptions()
-        self._output_path: Path | None = None
 
         self._build_toolbar()
 
@@ -58,10 +57,15 @@ class MainWindow(QMainWindow):
         self.playback = SyncPlayback(self.players)
         root.addWidget(TransportBar(self.playback))
 
+        self.render_panel = RenderPanel(self.current_project)
+        self.render_panel.optionsChanged.connect(self._on_state_changed)
+        root.addWidget(self.render_panel)
+
         space = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
         space.activated.connect(self.playback.toggle)
 
         self.setCentralWidget(central)
+        self._on_state_changed()
 
     # --- Toolbar ---------------------------------------------------------
 
@@ -111,16 +115,27 @@ class MainWindow(QMainWindow):
         self._on_state_changed()
 
     def _on_state_changed(self) -> None:
-        """Session state changed; render panel refresh hooks in here (phase 4)."""
+        """Refresh the CLI command display and render availability."""
+        problems = []
+        players = self.players()
+        if not players:
+            problems.append("Ajoutez au moins une vidéo")
+        problems.extend(
+            f"Plage invalide sur {player.source.path.name}"
+            for player in players
+            if not player.is_range_valid()
+        )
+        self.render_panel.refresh(self.current_project(), problems)
 
     # --- Project ---------------------------------------------------------
 
     def current_project(self) -> Project:
-        return Project(
+        project = Project(
             videos=[player.to_video_entry() for player in self.players()],
-            render=self._render_options,
-            output_path=self._output_path,
+            render=self.render_panel.render_options(),
         )
+        project.output_path = self.render_panel.output_path(project)
+        return project
 
     def _add_video_dialog(self) -> None:
         file_name, _ = QFileDialog.getOpenFileName(self, "Ajouter une vidéo", "", VIDEO_FILTER)
@@ -140,20 +155,33 @@ class MainWindow(QMainWindow):
         for existing in self.players():
             self._remove_player(existing)
         self._project_path = Path(file_name)
-        self._render_options = project.render
-        self._output_path = project.output_path
+        self.render_panel.apply_options(project.render, project.output_path)
 
-        missing = []
         for entry in project.videos:
-            if not entry.path.exists():
-                missing.append(entry.path)
-                continue
-            player = self.add_video(entry.path)
+            path = entry.path
+            if not path.exists():
+                relocated = self._relocate_video(path)
+                if relocated is None:
+                    continue
+                path = relocated
+            player = self.add_video(path)
             if player is not None:
                 player.apply_entry(entry)
-        if missing:
-            names = "\n".join(str(path) for path in missing)
-            QMessageBox.warning(self, "Vidéos introuvables", f"Fichiers introuvables :\n{names}")
+
+    def _relocate_video(self, path: Path) -> Path | None:
+        """Offer to locate a project video whose file no longer exists."""
+        answer = QMessageBox.question(
+            self,
+            "Vidéo introuvable",
+            f"Fichier introuvable :\n{path}\n\nVoulez-vous le relocaliser ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return None
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, f"Relocaliser {path.name}", "", VIDEO_FILTER
+        )
+        return Path(file_name) if file_name else None
 
     def _save_project_dialog(self) -> None:
         target = self._project_path

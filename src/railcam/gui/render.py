@@ -6,7 +6,31 @@ management lives in the Qt layer.
 
 from __future__ import annotations
 
+import shutil
+import sys
+from pathlib import Path
+
 from railcam.gui.project import Project, RenderOptions, VideoEntry
+
+
+def resolve_railcam_command() -> tuple[str, list[str]]:
+    """Return (program, prefix_args) to run the railcam CLI.
+
+    Prefers the railcam executable from the current environment; falls back
+    to running the CLI through the GUI's own Python interpreter so both
+    always share one installation.
+    """
+    # Prefer the railcam installed alongside the GUI's interpreter, so both
+    # always come from the same environment (PATH may hold another install).
+    scripts_dir = Path(sys.executable).parent
+    for name in ("railcam.exe", "railcam"):
+        candidate = scripts_dir / name
+        if candidate.exists():
+            return str(candidate), []
+    executable = shutil.which("railcam")
+    if executable:
+        return executable, []
+    return sys.executable, ["-c", "from railcam.cli import main; import sys; sys.exit(main())"]
 
 
 def _input_spec(video: VideoEntry) -> str:
