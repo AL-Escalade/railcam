@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from railcam.gui.progress import GlobalProgress, parse_progress, split_output_chunks
+from railcam.gui.progress import (
+    GlobalProgress,
+    expected_stage_count,
+    parse_progress,
+    split_output_chunks,
+)
 
 
 def test_parses_detecting_progress_line() -> None:
@@ -23,6 +28,30 @@ def test_non_progress_lines_return_none() -> None:
     assert parse_progress("Analyzing: video.mp4") is None
     assert parse_progress("  Resolution: 1920x1080") is None
     assert parse_progress("") is None
+
+
+def test_parses_writing_frames_progress_line() -> None:
+    line = "  Writing frames: [███░░░] 45.5% (10/22)"
+
+    assert parse_progress(line) == ("Writing frames", 10, 22)
+
+
+def test_expected_stage_count_includes_output_stages() -> None:
+    # Per video: Detecting + Processing; then Writing frames + Encoding
+    assert expected_stage_count(1) == 4
+    assert expected_stage_count(2) == 6
+
+
+def test_full_render_sequence_reaches_one() -> None:
+    tracker = GlobalProgress(total_stages=expected_stage_count(1))
+
+    tracker.update("Detecting", 100, 100)
+    tracker.update("Processing", 100, 100)
+    assert tracker.update("Writing frames", 50, 100) < 1.0
+    tracker.update("Writing frames", 100, 100)
+    tracker.update("Encoding MP4", 100, 100)
+
+    assert tracker.update("Complete", 100, 100) == pytest.approx(1.0)
 
 
 def test_global_progress_single_video_two_stages() -> None:

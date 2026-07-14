@@ -24,7 +24,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from railcam.gui.progress import GlobalProgress, parse_progress, split_output_chunks
+from railcam.gui.progress import (
+    GlobalProgress,
+    expected_stage_count,
+    parse_progress,
+    split_output_chunks,
+)
 from railcam.gui.project import Project, RenderOptions
 from railcam.gui.render import build_cli_args, format_cli_command, resolve_railcam_command
 
@@ -257,8 +262,9 @@ class RenderPanel(QWidget):
         if not project.videos:
             return
         self._last_output = project.output_path
-        # The CLI shows two bar stages (Detecting, Processing) per video
-        self._global_progress = GlobalProgress(total_stages=2 * len(project.videos))
+        self._global_progress = GlobalProgress(
+            total_stages=expected_stage_count(len(project.videos))
+        )
         self.log_view.clear()
         self.log_view.hide()
         self.open_button.hide()

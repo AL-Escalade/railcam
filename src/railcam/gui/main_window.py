@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from railcam.gui.player_widget import PlayerWidget
-from railcam.gui.project import Project, ProjectError
+from railcam.gui.project import Project, ProjectError, RenderOptions
 from railcam.gui.render_panel import RenderPanel
 from railcam.gui.transport import SyncPlayback, TransportBar
 from railcam.video import VideoError
@@ -74,10 +74,14 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
+        new_action = toolbar.addAction("🆕 Nouveau projet")
+        new_action.triggered.connect(self._new_project)
         open_action = toolbar.addAction("📁 Ouvrir un projet")
         open_action.triggered.connect(self._open_project_dialog)
-        save_action = toolbar.addAction("💾 Enregistrer le projet")
-        save_action.triggered.connect(self._save_project_dialog)
+        save_action = toolbar.addAction("💾 Enregistrer")
+        save_action.triggered.connect(self._save_project)
+        save_as_action = toolbar.addAction("💾 Enregistrer sous…")
+        save_as_action.triggered.connect(self._save_project_as)
         toolbar.addSeparator()
         add_action = toolbar.addAction("➕ Ajouter une vidéo")
         add_action.triggered.connect(self._add_video_dialog)
@@ -155,6 +159,7 @@ class MainWindow(QMainWindow):
         for existing in self.players():
             self._remove_player(existing)
         self._project_path = Path(file_name)
+        self.setWindowTitle(f"railcam — {self._project_path.name}")
         self.render_panel.apply_options(project.render, project.output_path)
 
         for entry in project.videos:
@@ -183,17 +188,43 @@ class MainWindow(QMainWindow):
         )
         return Path(file_name) if file_name else None
 
-    def _save_project_dialog(self) -> None:
-        target = self._project_path
-        if target is None:
-            file_name, _ = QFileDialog.getSaveFileName(
-                self, "Enregistrer le projet", "session.railcam.json", PROJECT_FILTER
+    def _new_project(self) -> None:
+        """Reset the session: remove all videos and restore default options."""
+        if self.players():
+            answer = QMessageBox.question(
+                self,
+                "Nouveau projet",
+                "Fermer la session en cours et repartir de zéro ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
-            if not file_name:
+            if answer != QMessageBox.StandardButton.Yes:
                 return
-            target = Path(file_name)
+        self.playback.stop()
+        for player in self.players():
+            self._remove_player(player)
+        self.render_panel.apply_options(RenderOptions(), None)
+        self._project_path = None
+        self.setWindowTitle("railcam")
+        self.statusBar().showMessage("Nouveau projet", 3000)
+
+    def _save_project(self) -> None:
+        if self._project_path is None:
+            self._save_project_as()
+        else:
+            self._write_project(self._project_path)
+
+    def _save_project_as(self) -> None:
+        suggestion = str(self._project_path) if self._project_path else "session.railcam.json"
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, "Enregistrer le projet sous", suggestion, PROJECT_FILTER
+        )
+        if file_name:
+            self._write_project(Path(file_name))
+
+    def _write_project(self, target: Path) -> None:
         self.current_project().save(target)
         self._project_path = target
+        self.setWindowTitle(f"railcam — {target.name}")
         self.statusBar().showMessage(f"Projet enregistré : {target}", 5000)
 
 

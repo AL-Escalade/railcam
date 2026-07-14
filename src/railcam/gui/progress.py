@@ -22,6 +22,15 @@ def split_output_chunks(chunk: str) -> list[str]:
     return [line for line in re.split(r"[\r\n]+", chunk) if line.strip()]
 
 
+def expected_stage_count(video_count: int) -> int:
+    """Number of CLI progress-bar stages for a render.
+
+    Per video: Detecting and Processing; then, once for the output:
+    Writing frames and Encoding (see cli.main and output.generate_output).
+    """
+    return 2 * video_count + 2
+
+
 class GlobalProgress:
     """Aggregates per-stage CLI progress into one overall ratio (0..1).
 
