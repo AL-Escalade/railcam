@@ -1,8 +1,10 @@
-"""Tests for synchronized playback time-to-frame mapping."""
+"""Tests for synchronized playback time-to-frame mapping and clock."""
 
 from __future__ import annotations
 
-from railcam.gui.playback import frame_at
+import pytest
+
+from railcam.gui.playback import PlaybackClock, frame_at, session_duration
 
 
 def test_time_zero_maps_to_start_frame() -> None:
@@ -34,3 +36,41 @@ def test_freezes_on_end_frame_when_time_exceeds_range() -> None:
 
 def test_negative_time_clamps_to_start_frame() -> None:
     assert frame_at(t_seconds=-1.0, start_frame=100, end_frame=250, fps=30.0) == 100
+
+
+def test_clock_accumulates_time_scaled_by_speed() -> None:
+    clock = PlaybackClock(speed=0.25)
+
+    clock.advance(2.0)
+
+    assert clock.t == pytest.approx(0.5)
+
+
+def test_clock_speed_change_only_affects_subsequent_time() -> None:
+    clock = PlaybackClock(speed=1.0)
+
+    clock.advance(1.0)
+    clock.speed = 0.5
+    clock.advance(1.0)
+
+    assert clock.t == pytest.approx(1.5)
+
+
+def test_clock_reset_returns_to_zero() -> None:
+    clock = PlaybackClock(speed=1.0)
+    clock.advance(3.0)
+
+    clock.reset()
+
+    assert clock.t == 0.0
+
+
+def test_session_duration_is_longest_video_range() -> None:
+    # (start, end, fps): 150 frames at 30 fps = 5 s; 120 frames at 20 fps = 6 s
+    ranges = [(100, 250, 30.0), (60, 180, 20.0)]
+
+    assert session_duration(ranges) == pytest.approx(6.0)
+
+
+def test_session_duration_empty_is_zero() -> None:
+    assert session_duration([]) == 0.0

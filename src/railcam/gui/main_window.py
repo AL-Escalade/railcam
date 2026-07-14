@@ -7,6 +7,7 @@ from importlib import resources
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from railcam.gui.player_widget import PlayerWidget
 from railcam.gui.project import Project, ProjectError, RenderOptions
+from railcam.gui.transport import SyncPlayback, TransportBar
 from railcam.video import VideoError
 
 PROJECT_FILTER = "Projet railcam (*.railcam.json)"
@@ -52,6 +54,12 @@ class MainWindow(QMainWindow):
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setObjectName("emptyState")
         self._players_row.addWidget(self._empty_label)
+
+        self.playback = SyncPlayback(self.players)
+        root.addWidget(TransportBar(self.playback))
+
+        space = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        space.activated.connect(self.playback.toggle)
 
         self.setCentralWidget(central)
 
@@ -94,6 +102,7 @@ class MainWindow(QMainWindow):
         return player
 
     def _remove_player(self, player: PlayerWidget) -> None:
+        self.playback.forget(player)
         self._players_row.removeWidget(player)
         player.close_source()
         player.deleteLater()
