@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from railcam.gui.progress import parse_progress, split_output_chunks
+from railcam.gui.progress import GlobalProgress, parse_progress, split_output_chunks
 from railcam.gui.project import Project, RenderOptions
 from railcam.gui.render import build_cli_args, format_cli_command, resolve_railcam_command
 
@@ -92,6 +92,7 @@ class RenderPanel(QWidget):
         self._process.logLine.connect(self._append_log)
         self._process.finished.connect(self._on_finished)
         self._last_output: Path | None = None
+        self._global_progress: GlobalProgress | None = None
         self._build_ui()
 
     # --- UI ----------------------------------------------------------------
@@ -256,6 +257,8 @@ class RenderPanel(QWidget):
         if not project.videos:
             return
         self._last_output = project.output_path
+        # The CLI shows two bar stages (Detecting, Processing) per video
+        self._global_progress = GlobalProgress(total_stages=2 * len(project.videos))
         self.log_view.clear()
         self.log_view.hide()
         self.open_button.hide()
@@ -268,9 +271,12 @@ class RenderPanel(QWidget):
         self._process.start(build_cli_args(project), working_dir)
 
     def _on_progress(self, stage: str, current: int, total: int) -> None:
-        percent = int(current * 100 / total) if total else 0
-        self.progress_bar.setValue(percent)
-        self.stage_label.setText(f"{stage} {percent}%")
+        if self._global_progress is None:
+            return
+        overall = self._global_progress.update(stage, current, total)
+        self.progress_bar.setValue(round(overall * 100))
+        stage_percent = int(current * 100 / total) if total else 0
+        self.stage_label.setText(f"{stage} {stage_percent}%")
 
     def _append_log(self, line: str) -> None:
         self.log_view.appendPlainText(line)
