@@ -40,6 +40,7 @@ from railcam.output import (
     parse_output_format,
 )
 from railcam.pose import (
+    HIGH_RES_IMGSZ,
     ClimberSelector,
     DetectionResult,
     MultiPersonDetectionResult,
@@ -51,7 +52,12 @@ from railcam.processing import (
     interpolate_positions,
     smooth_positions,
 )
-from railcam.tracking import build_tracks, select_track, track_to_detections
+from railcam.tracking import (
+    build_tracks,
+    repair_track_gaps,
+    select_track,
+    track_to_detections,
+)
 from railcam.video import (
     InvalidFrameRangeError,
     UnsupportedFormatError,
@@ -330,6 +336,24 @@ def _detect_poses_with_tracking(
 
     tracks = build_tracks(frame_results)
     selected = select_track(tracks, video_input.climber_selector)
+
+    # Repair undetected frames (crouched start, occlusions) with targeted
+    # high-resolution inference, bounded to the frames that need it
+    if selected is not None:
+        frame_nums = [r.frame_num for r in frame_results]
+        missing = sum(1 for f in frame_nums if f not in selected.detections)
+        if missing:
+            print(f"  Repairing {missing} undetected frame(s) at high resolution...")
+            repaired = repair_track_gaps(
+                selected,
+                frame_nums,
+                lambda f: (
+                    detector.detect_all_persons(frames_cache[f], f, imgsz=HIGH_RES_IMGSZ).persons
+                ),
+                avoid=[track for track in tracks if track is not selected],
+            )
+            print(f"  Recovered {repaired}/{missing} frame(s)")
+
     detections = track_to_detections(selected, [r.frame_num for r in frame_results])
 
     return _PoseDetectionResult(

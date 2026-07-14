@@ -22,6 +22,10 @@ class ClimberSelector(Enum):
 # Confidence threshold for hip visibility
 CONFIDENCE_THRESHOLD = 0.3
 
+# Inference resolution for the targeted gap-repair pass: detects small or
+# crouched climbers on 4K footage that the default resolution misses.
+HIGH_RES_IMGSZ = 1280
+
 
 # YOLOv8 pose keypoint indices (COCO format)
 # 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
@@ -300,7 +304,12 @@ class PoseDetector:
             landmarks=person.landmarks,
         )
 
-    def detect_all_persons(self, frame: np.ndarray, frame_num: int) -> MultiPersonDetectionResult:
+    def detect_all_persons(
+        self,
+        frame: np.ndarray,
+        frame_num: int,
+        imgsz: int | None = None,
+    ) -> MultiPersonDetectionResult:
         """Detect all persons with valid pelvis in a frame.
 
         Only returns persons whose hip landmarks are detected with sufficient confidence.
@@ -309,6 +318,9 @@ class PoseDetector:
         Args:
             frame: The video frame to analyze.
             frame_num: The frame number.
+            imgsz: Optional inference resolution override. Higher values
+                (e.g. HIGH_RES_IMGSZ) detect small/crouched persons on 4K
+                footage at the cost of slower inference.
 
         Returns:
             MultiPersonDetectionResult with all detected persons.
@@ -316,7 +328,10 @@ class PoseDetector:
         height, width = frame.shape[:2]
 
         # Run inference
-        results = self._model(frame, verbose=False)
+        if imgsz is not None:
+            results = self._model(frame, imgsz=imgsz, verbose=False)
+        else:
+            results = self._model(frame, verbose=False)
 
         if not results or len(results) == 0:
             return MultiPersonDetectionResult(frame_num=frame_num, persons=[])

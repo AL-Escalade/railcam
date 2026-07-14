@@ -8,6 +8,7 @@ so static bystanders are never selected.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from railcam.pose import (
@@ -28,6 +29,9 @@ MIN_CLIMB_SPAN = 0.10
 # A climbing track must also cover at least this fraction of the best track's
 # displacement, so detection fragments cannot outrank a full climb.
 MIN_RELATIVE_SPAN = 0.5
+# During gap repair, a candidate this close to another track's detection on
+# the same frame is that other person — never attach it.
+OTHER_TRACK_EPSILON = 0.05
 
 FRAME_CENTER_X = 0.5
 
@@ -128,6 +132,73 @@ def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None
     if selector == ClimberSelector.RIGHT:
         return max(candidates, key=lambda track: track.mean_x)
     return min(candidates, key=lambda track: abs(track.mean_x - FRAME_CENTER_X))
+
+
+def repair_track_gaps(
+    track: Track,
+    frame_nums: list[int],
+    detect: Callable[[int], list[PersonDetection]],
+    avoid: list[Track] | None = None,
+) -> int:
+    """Fill the track's missing frames using a (higher-resolution) detector.
+
+    Gap frames are processed from the nearest known frames outward, so each
+    repaired frame anchors the next and repairs chain along the trajectory.
+    A recovered person is attached only within the gap-scaled jump distance
+    of the nearest known position, and never when it coincides with another
+    track's detection on that frame (no stealing the bystander).
+
+    Args:
+        track: The selected climber track, modified in place.
+        frame_nums: All frame numbers of the analyzed range.
+        detect: frame_num -> persons, typically high-resolution inference.
+        avoid: Other tracks whose persons must not be attached.
+
+    Returns:
+        Number of frames recovered.
+    """
+    known = set(track.detections)
+    if not known:
+        return 0
+    missing = [f for f in frame_nums if f not in known]
+
+    repaired = 0
+    for frame_num in sorted(missing, key=lambda f: min(abs(f - k) for k in known)):
+        anchor_frame = min(track.detections, key=lambda k: abs(k - frame_num))
+        anchor = track.detections[anchor_frame].pelvis
+        allowed = _allowed_jump(abs(frame_num - anchor_frame))
+
+        best: PersonDetection | None = None
+        best_distance = allowed
+        for candidate in detect(frame_num):
+            if _is_other_tracks_person(candidate, frame_num, avoid):
+                continue
+            distance = math.hypot(candidate.pelvis.x - anchor.x, candidate.pelvis.y - anchor.y)
+            if distance <= best_distance:
+                best = candidate
+                best_distance = distance
+
+        if best is not None:
+            track.add(frame_num, best)
+            repaired += 1
+    return repaired
+
+
+def _is_other_tracks_person(
+    candidate: PersonDetection, frame_num: int, avoid: list[Track] | None
+) -> bool:
+    """True when the candidate matches another track's detection on this frame."""
+    for other in avoid or []:
+        detection = other.detections.get(frame_num)
+        if detection is not None and (
+            math.hypot(
+                detection.pelvis.x - candidate.pelvis.x,
+                detection.pelvis.y - candidate.pelvis.y,
+            )
+            < OTHER_TRACK_EPSILON
+        ):
+            return True
+    return False
 
 
 def track_to_detections(track: Track | None, frame_nums: list[int]) -> list[DetectionResult]:
