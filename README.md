@@ -82,10 +82,16 @@ sudo apt install ffmpeg
 pip install .
 ```
 
+With the desktop GUI (see below):
+
+```bash
+pip install ".[gui]"
+```
+
 Development install:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,gui]"
 pre-commit install  # Auto-setup git hooks (LFS check, linting)
 ```
 
@@ -105,6 +111,36 @@ railcam \
   --input video.mp4:100:250:left \
   --input video.mp4:100:250:right
 ```
+
+---
+
+## Desktop GUI
+
+Prefer picking frames visually? Install the `gui` extra and run:
+
+```bash
+railcam-gui
+```
+
+![railcam GUI: two synchronized videos side by side with a render in progress](docs/railcam-gui.png)
+
+The GUI lets you:
+
+- Load one or more videos side by side and scrub them frame by frame
+  (arrow keys: ±1 frame, Shift+arrows: ±10)
+- Zoom into a detail with the mouse wheel (drag to pan, double-click to
+  reset) — the view persists while stepping through frames, ideal for
+  finding the exact start frame
+- Set each video's start/end frame from the displayed image — start frames
+  are the synchronization points (t=0), exactly like the CLI
+- Choose the climber (auto/left/right) per video
+- Play all videos synchronized in slow motion (space bar to play/pause)
+  to check the timing before rendering
+- Configure render options, see the equivalent CLI command live (copyable),
+  and launch the render with an overall progress bar covering detection,
+  processing and encoding
+- Manage sessions as `.railcam.json` project files (new / open / save /
+  save as), with relocation of moved video files on open
 
 ---
 
@@ -157,9 +193,11 @@ Each input is processed independently, then composed horizontally.
 ## How It Works
 
 1. Extract frames from the requested range
-2. Detect poses with YOLOv8-pose
-3. Filter to climbers with visible pelvis
-4. Select and track the target climber
+2. Detect poses with YOLOv8-pose (all persons per frame)
+3. Filter to persons with visible pelvis
+4. Group detections into motion tracks and select the climber by movement:
+   static bystanders never win, `left`/`right`/`auto` apply among the
+   tracks that actually climb
 5. Measure torso height (shoulder ↔ hip)
 6. Normalize zoom level
 7. Interpolate gaps and smooth motion

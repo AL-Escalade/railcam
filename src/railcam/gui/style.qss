@@ -1,0 +1,165 @@
+/* railcam GUI — dark theme, climbing-orange accent */
+
+QMainWindow, QWidget {
+    background-color: #1e1f22;
+    color: #e8e8e8;
+    font-size: 13px;
+}
+
+QToolBar {
+    background-color: #2b2d31;
+    border: none;
+    padding: 4px;
+    spacing: 6px;
+}
+
+QToolBar QToolButton {
+    background: transparent;
+    color: #e8e8e8;
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+QToolBar QToolButton:hover {
+    background-color: #3a3d42;
+}
+
+#playerCard {
+    background-color: #2b2d31;
+    border: 1px solid #3a3d42;
+    border-radius: 10px;
+}
+
+#playerCard:focus {
+    border: 1px solid #ff7a1a;
+}
+
+#playerTitle {
+    font-weight: bold;
+}
+
+#playerMeta, #frameCounter {
+    color: #9a9da3;
+    font-size: 12px;
+}
+
+#frameDisplay {
+    background-color: #141517;
+    border-radius: 6px;
+}
+
+#emptyState {
+    color: #9a9da3;
+    font-size: 16px;
+}
+
+#rangeLabel {
+    color: #9a9da3;
+}
+
+#rangeLabel[invalid="true"] {
+    color: #ff5f56;
+    font-weight: bold;
+}
+
+QPushButton {
+    background-color: #3a3d42;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+}
+
+QPushButton:hover {
+    background-color: #4a4d53;
+}
+
+QPushButton:pressed {
+    background-color: #ff7a1a;
+    color: #1e1f22;
+}
+
+QPushButton:disabled {
+    color: #6a6d73;
+    background-color: #2f3136;
+}
+
+QPushButton#renderButton {
+    background-color: #ff7a1a;
+    color: #1e1f22;
+    font-weight: bold;
+    padding: 8px 18px;
+}
+
+QPushButton#renderButton:hover {
+    background-color: #ff8f40;
+}
+
+QToolButton {
+    background-color: transparent;
+    color: #e8e8e8;
+    border-radius: 5px;
+    padding: 4px 7px;
+}
+
+QToolButton:hover {
+    background-color: #3a3d42;
+}
+
+QComboBox {
+    background-color: #3a3d42;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 10px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2b2d31;
+    selection-background-color: #ff7a1a;
+    selection-color: #1e1f22;
+}
+
+QLineEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #141517;
+    border: 1px solid #3a3d42;
+    border-radius: 6px;
+    padding: 5px 8px;
+    selection-background-color: #ff7a1a;
+}
+
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #ff7a1a;
+}
+
+QProgressBar {
+    background-color: #141517;
+    border: none;
+    border-radius: 6px;
+    height: 12px;
+    text-align: center;
+    color: #e8e8e8;
+    font-size: 11px;
+}
+
+QProgressBar::chunk {
+    background-color: #ff7a1a;
+    border-radius: 6px;
+}
+
+QStatusBar {
+    background-color: #2b2d31;
+    color: #9a9da3;
+}
+
+QMessageBox {
+    background-color: #2b2d31;
+}
+
+QScrollBar:horizontal, QScrollBar:vertical {
+    background: #1e1f22;
+    border: none;
+}
+
+QScrollBar::handle {
+    background: #3a3d42;
+    border-radius: 4px;
+}

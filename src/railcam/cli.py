@@ -40,18 +40,23 @@ from railcam.output import (
     parse_output_format,
 )
 from railcam.pose import (
+    HIGH_RES_IMGSZ,
     ClimberSelector,
     DetectionResult,
-    PelvisPosition,
+    MultiPersonDetectionResult,
     PoseDetector,
     draw_pose_overlay_on_crop,
-    person_to_detection_result,
-    select_climber,
 )
 from railcam.processing import (
     NoValidDetectionsError,
     interpolate_positions,
-    smooth_positions,
+    smooth_positions_zero_phase,
+)
+from railcam.tracking import (
+    build_tracks,
+    repair_track_gaps,
+    select_track,
+    track_to_detections,
 )
 from railcam.video import (
     InvalidFrameRangeError,
@@ -303,7 +308,11 @@ def _detect_poses_with_tracking(
     detector: PoseDetector,
     frame_count: int,
 ) -> _PoseDetectionResult:
-    """Detect poses for all frames with proximity-based climber tracking.
+    """Detect poses for all frames, then select the climber by motion.
+
+    All persons are detected first; detections are grouped into motion
+    tracks and the climber is chosen among tracks that actually climb,
+    so static bystanders are never selected (see railcam.tracking).
 
     Args:
         video_input: Video input specification.
@@ -313,52 +322,45 @@ def _detect_poses_with_tracking(
     Returns:
         Detection results, frame cache, and torso heights.
     """
-    selector = video_input.climber_selector
-    detections: list[DetectionResult] = []
-    detections_by_frame: dict[int, DetectionResult] = {}
     frames_cache: dict[int, Any] = {}
-    torso_heights: list[float] = []
-
-    # Track previous position for proximity-based tracking
-    previous_position: PelvisPosition | None = None
+    frame_results: list[MultiPersonDetectionResult] = []
 
     for i, (frame_num, frame) in enumerate(
         extract_frames(video_input.path, video_input.start_frame, video_input.end_frame)
     ):
-        # Detect all persons with valid pelvis
-        multi_result = detector.detect_all_persons(frame, frame_num)
-
-        # Select the target climber
-        selected_person = select_climber(
-            multi_result.persons,
-            selector,
-            previous_position,
-        )
-
-        # Convert to DetectionResult format
-        detection = person_to_detection_result(selected_person, frame_num)
-
-        # Update previous position for next frame's proximity tracking
-        if detection.position is not None:
-            previous_position = detection.position
-
-        detections.append(detection)
-        detections_by_frame[frame_num] = detection
+        frame_results.append(detector.detect_all_persons(frame, frame_num))
         frames_cache[frame_num] = frame
-
-        # Collect torso heights for zoom calculation
-        if detection.torso is not None:
-            torso_heights.append(detection.torso.height)
-
         print_progress(i + 1, frame_count, "  Detecting")
 
     print()  # Newline after progress bar
 
+    tracks = build_tracks(frame_results)
+    selected = select_track(tracks, video_input.climber_selector)
+
+    # Repair undetected frames (crouched start, occlusions) with targeted
+    # high-resolution inference, bounded to the frames that need it
+    if selected is not None:
+        frame_nums = [r.frame_num for r in frame_results]
+        missing = sum(1 for f in frame_nums if f not in selected.detections)
+        if missing:
+            print(f"  Repairing {missing} undetected frame(s) at high resolution...")
+            repaired = repair_track_gaps(
+                selected,
+                frame_nums,
+                lambda f: (
+                    detector.detect_all_persons(frames_cache[f], f, imgsz=HIGH_RES_IMGSZ).persons
+                ),
+                avoid=[track for track in tracks if track is not selected],
+            )
+            print(f"  Recovered {repaired}/{missing} frame(s)")
+
+    detections = track_to_detections(selected, [r.frame_num for r in frame_results])
+
     return _PoseDetectionResult(
         detections=detections,
-        detections_by_frame=detections_by_frame,
+        detections_by_frame={d.frame_num: d for d in detections},
         frames_cache=frames_cache,
-        torso_heights=torso_heights,
+        torso_heights=[d.torso.height for d in detections if d.torso is not None],
     )
 
 
@@ -473,7 +475,7 @@ def crop_video(
 
     # Process positions
     positions = interpolate_positions(analysis.detections)
-    positions = smooth_positions(positions)
+    positions = smooth_positions_zero_phase(positions)
 
     # Crop frames
     print("  Processing frames (scale then crop)...")

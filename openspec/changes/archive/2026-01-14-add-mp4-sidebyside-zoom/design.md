@@ -48,7 +48,7 @@ torso_height = abs(hip_midpoint_y - shoulder_midpoint_y)
 
 **Target ratio constant:**
 ```python
-TORSO_HEIGHT_RATIO = 1/3  # Torso should be 1/3 of output height
+TORSO_HEIGHT_RATIO = 1 / 3  # Torso should be 1/3 of output height
 ```
 
 **Zoom factor calculation:**
