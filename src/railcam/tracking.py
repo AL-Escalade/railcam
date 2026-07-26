@@ -31,10 +31,10 @@ MAX_JUMP_TOTAL = 0.30
 # other lane's climber and the belayer at the foot of the wall, which the
 # euclidean budget alone lets in once the gap widens.
 MAX_LANE_DRIFT = 0.10
-# Minimum vertical displacement for a track to qualify as a climber.
+# Minimum upward displacement for a track to qualify as a climber.
 MIN_CLIMB_SPAN = 0.10
 # A climbing track must also cover at least this fraction of the best track's
-# displacement, so detection fragments cannot outrank a full climb.
+# rise, so detection fragments cannot outrank a full climb.
 MIN_RELATIVE_SPAN = 0.5
 # During gap repair, a candidate this close to another track's detection on
 # the same frame is that other person — never attach it.
@@ -65,14 +65,52 @@ class Track:
         return sum(p.pelvis.x for p in self.detections.values()) / len(self.detections)
 
     @property
-    def vertical_span(self) -> float:
-        ys = [p.pelvis.y for p in self.detections.values()]
-        return max(ys) - min(ys)
+    def climb_rise(self) -> float:
+        """Largest rise from an earlier frame to a later one.
+
+        Image y grows downward, so climbing means a decreasing y. Measuring
+        the rise rather than the unsigned span keeps a bystander swept *down*
+        the frame by an upward camera tilt from ranking as a climber -- her
+        apparent travel can exceed the climber's, and the relative-span cut
+        would then discard the real climber.
+
+        Taking the best earlier-to-later rise, rather than first minus last,
+        keeps the measure meaningful when the track starts after the climb
+        began or when the climber comes back down (fall, lower-off).
+        """
+        lowest = 0.0  # largest y seen so far: the lowest point in the frame
+        rise = 0.0
+        for frame_num in sorted(self.detections):
+            y = self.detections[frame_num].pelvis.y
+            lowest = max(lowest, y)
+            rise = max(rise, lowest - y)
+        return rise
 
 
 def _allowed_jump(gap_frames: int) -> float:
     """Maximum association distance after gap_frames without detection."""
     return min(MAX_JUMP_PER_FRAME * max(gap_frames, 1), MAX_JUMP_TOTAL)
+
+
+def _dedupe_persons(persons: list[PersonDetection]) -> list[PersonDetection]:
+    """Drop detections that land on someone already detected in the frame.
+
+    Pose inference sometimes reports the same person twice, a few pixels
+    apart. Only one copy can be matched to her track, so the orphan starts a
+    competing track that then steals the following frames and leaves two
+    fragments where there was one climb. Distinct people in a speed final are
+    lanes apart, well beyond this radius; the most confident copy wins.
+    """
+    kept: list[PersonDetection] = []
+    for person in sorted(persons, key=lambda p: p.pelvis.confidence, reverse=True):
+        if any(
+            math.hypot(person.pelvis.x - other.pelvis.x, person.pelvis.y - other.pelvis.y)
+            < OTHER_TRACK_EPSILON
+            for other in kept
+        ):
+            continue
+        kept.append(person)
+    return kept
 
 
 def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]:
@@ -84,6 +122,7 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
     """
     tracks: list[Track] = []
     for result in frame_results:
+        persons = _dedupe_persons(result.persons)
         candidates = sorted(
             (
                 (
@@ -95,7 +134,7 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
                     person_index,
                 )
                 for track_index, track in enumerate(tracks)
-                for person_index, person in enumerate(result.persons)
+                for person_index, person in enumerate(persons)
             ),
         )
         matched_tracks: set[int] = set()
@@ -104,7 +143,7 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
             if track_index in matched_tracks or person_index in matched_persons:
                 continue
             track = tracks[track_index]
-            person = result.persons[person_index]
+            person = persons[person_index]
             # A climber stays in her lane: a large horizontal offset is someone
             # else, however plausible the euclidean distance looks once the
             # gap-scaled budget has grown.
@@ -116,7 +155,7 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
             matched_tracks.add(track_index)
             matched_persons.add(person_index)
 
-        for person_index, person in enumerate(result.persons):
+        for person_index, person in enumerate(persons):
             if person_index not in matched_persons:
                 new_track = Track()
                 new_track.add(result.frame_num, person)
@@ -133,11 +172,11 @@ def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None
     if not tracks:
         return None
 
-    climbing = [track for track in tracks if track.vertical_span >= MIN_CLIMB_SPAN]
+    climbing = [track for track in tracks if track.climb_rise >= MIN_CLIMB_SPAN]
     if climbing:
-        best_span = max(track.vertical_span for track in climbing)
+        best_rise = max(track.climb_rise for track in climbing)
         climbing = [
-            track for track in climbing if track.vertical_span >= MIN_RELATIVE_SPAN * best_span
+            track for track in climbing if track.climb_rise >= MIN_RELATIVE_SPAN * best_rise
         ]
     candidates = climbing or tracks
 

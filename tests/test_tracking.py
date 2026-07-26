@@ -49,7 +49,7 @@ def test_static_and_climber_form_two_tracks() -> None:
     tracks = build_tracks(scene_static_plus_climber())
 
     assert len(tracks) == 2
-    spans = sorted(track.vertical_span for track in tracks)
+    spans = sorted(track.climb_rise for track in tracks)
     assert spans[0] == pytest.approx(0.0, abs=0.01)
     assert spans[1] == pytest.approx(0.8, abs=0.01)
 
@@ -136,7 +136,50 @@ def test_climber_reappearing_in_her_lane_rejoins_her_track() -> None:
     assert list(climber.detections) == [0, 12]
 
 
+def test_duplicate_detection_does_not_split_a_track() -> None:
+    # Salt Lake City 2023 (frame 18684): YOLO emitted the right climber twice,
+    # at (0.57,0.43) and (0.57,0.44). The track took one copy, the orphan
+    # started a second track that won every following frame, and the climber
+    # ended up as two fragments too short to be selected.
+    count = 10
+    frames = []
+    for i in range(count):
+        y = 0.53 - 0.016 * i
+        persons = [person(0.57, y)]
+        if i == 5:
+            persons.append(person(0.57, y + 0.01))  # same person, detected twice
+        frames.append(persons)
+
+    tracks = build_tracks(frames_of(*frames))
+
+    assert len(tracks) == 1
+    assert len(tracks[0].detections) == count
+
+
 # --- select_track --------------------------------------------------------
+
+
+def test_bystander_swept_down_by_a_camera_tilt_is_not_a_climber() -> None:
+    # Salt Lake City 2023, start of the final: the camera tilts up, so people
+    # standing at the base drift down the frame. Their unsigned span (0.43)
+    # beat the climber's (0.19), which made them set the relative cut that
+    # then discarded the real climber -- leaving only bystanders to choose from.
+    count = 20
+    frames = frames_of(
+        *[
+            [
+                person(0.80, 0.56 + 0.43 * i / (count - 1)),  # swept down, static in the world
+                person(0.35, 0.57 - 0.19 * i / (count - 1)),  # actually climbing
+            ]
+            for i in range(count)
+        ]
+    )
+    tracks = build_tracks(frames)
+
+    selected = select_track(tracks, ClimberSelector.RIGHT)
+
+    assert selected is not None
+    assert selected.mean_x == pytest.approx(0.35, abs=0.02)
 
 
 def test_static_bystander_is_never_selected_even_when_central() -> None:
@@ -149,7 +192,7 @@ def test_static_bystander_is_never_selected_even_when_central() -> None:
     selected = select_track(tracks, ClimberSelector.AUTO)
 
     assert selected is not None
-    assert selected.vertical_span > 0.5
+    assert selected.climb_rise > 0.5
 
 
 def test_left_selector_ignores_static_person_further_left() -> None:
@@ -318,8 +361,8 @@ def test_repair_never_steals_another_tracks_person() -> None:
             persons.append(person(0.33, 0.77 - 0.005 * (i - 13)))
         frames.append(persons)
     tracks = build_tracks(frames_of(*frames))
-    bystander = min(tracks, key=lambda t: t.vertical_span)
-    climber = max(tracks, key=lambda t: t.vertical_span)
+    bystander = min(tracks, key=lambda t: t.climb_rise)
+    climber = max(tracks, key=lambda t: t.climb_rise)
 
     repaired = repair_track_gaps(
         climber,
