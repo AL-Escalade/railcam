@@ -141,8 +141,7 @@ class TestSmoothPositionsZeroPhase:
         # response forward (its centre of mass lands past 2 -> the camera trails
         # the climber). The forward-backward filter keeps it centred: no lag.
         positions = [
-            ProcessedPosition(i, x, 0.0, False)
-            for i, x in enumerate([0.0, 0.0, 1.0, 0.0, 0.0])
+            ProcessedPosition(i, x, 0.0, False) for i, x in enumerate([0.0, 0.0, 1.0, 0.0, 0.0])
         ]
 
         xs = [p.x for p in smooth_positions_zero_phase(positions, alpha=0.5)]
