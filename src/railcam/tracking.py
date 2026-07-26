@@ -24,11 +24,12 @@ MAX_JUMP_PER_FRAME = 0.15
 # Cap on gap-scaled jumps: stays below the typical distance between lanes,
 # so a track never teleports onto the other climber after a detection gap.
 MAX_JUMP_TOTAL = 0.30
-# Maximum horizontal deviation from the anchor when repairing a gap. A climber
-# stays in a near-fixed vertical lane, so x barely changes even across large
-# (vertical) gaps. Unlike the gap-scaled total budget, this stays fixed: it
-# rejects the other lane's climber, which the euclidean budget alone lets in
-# once the gap widens (see repair_track_gaps).
+# Maximum horizontal deviation from the previous position, both when
+# associating detections and when repairing a gap. A climber stays in a
+# near-fixed vertical lane, so x barely changes even across large (vertical)
+# gaps. Unlike the gap-scaled total budget, this stays fixed: it rejects the
+# other lane's climber and the belayer at the foot of the wall, which the
+# euclidean budget alone lets in once the gap widens.
 MAX_LANE_DRIFT = 0.10
 # Minimum vertical displacement for a track to qualify as a climber.
 MIN_CLIMB_SPAN = 0.10
@@ -78,7 +79,8 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
     """Group per-frame detections into tracks by nearest-neighbor association.
 
     Closest (track, person) pairs are matched first, one-to-one, within the
-    gap-scaled jump limit; unmatched persons start new tracks.
+    gap-scaled jump limit and the fixed lane width; unmatched persons start
+    new tracks.
     """
     tracks: list[Track] = []
     for result in frame_results:
@@ -102,9 +104,15 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
             if track_index in matched_tracks or person_index in matched_persons:
                 continue
             track = tracks[track_index]
+            person = result.persons[person_index]
+            # A climber stays in her lane: a large horizontal offset is someone
+            # else, however plausible the euclidean distance looks once the
+            # gap-scaled budget has grown.
+            if abs(track.last_position.x - person.pelvis.x) > MAX_LANE_DRIFT:
+                continue
             if distance > _allowed_jump(result.frame_num - track.last_frame):
                 continue
-            track.add(result.frame_num, result.persons[person_index])
+            track.add(result.frame_num, person)
             matched_tracks.add(track_index)
             matched_persons.add(person_index)
 

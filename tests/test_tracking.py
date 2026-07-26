@@ -92,6 +92,50 @@ def test_large_jump_starts_a_new_track_instead_of_teleporting() -> None:
     assert len(tracks) == 2
 
 
+def test_duplicate_bystander_detection_never_teleports_the_climber_track() -> None:
+    # The diagnosed video (frames 121-128): the left climber is missed for
+    # seven frames while the belayer keeps being detected, then YOLO emits the
+    # belayer twice on one frame. Her own track takes one copy; the orphan sits
+    # 0.279 from the climber's last sighting -- inside the gap-scaled budget
+    # (0.30) -- so it used to be attached to the climber's track, which then
+    # followed the belayer for the rest of the clip.
+    belayer = (0.191, 0.943)
+    frames = []
+    for i in range(8):
+        persons = [person(*belayer)]
+        if i == 0:
+            persons.append(person(0.361, 0.722))  # climber's last sighting
+        if i == 7:
+            persons.append(person(*belayer))  # duplicate of the same person
+        frames.append(persons)
+
+    tracks = build_tracks(frames_of(*frames))
+
+    climber = next(
+        track for track in tracks if track.detections[min(track.detections)].pelvis.x > 0.3
+    )
+    assert list(climber.detections) == [0]
+
+
+def test_climber_reappearing_in_her_lane_rejoins_her_track() -> None:
+    # Counterpart of the test above: the lane constraint must not stop a
+    # climber missed for many frames from being picked up again once she
+    # reappears where she left (video frames 121 -> 133).
+    frames = []
+    for i in range(13):
+        persons = [person(0.191, 0.943)]
+        if i in (0, 12):
+            persons.append(person(0.361, 0.722 - 0.0027 * i))
+        frames.append(persons)
+
+    tracks = build_tracks(frames_of(*frames))
+
+    climber = next(
+        track for track in tracks if track.detections[min(track.detections)].pelvis.x > 0.3
+    )
+    assert list(climber.detections) == [0, 12]
+
+
 # --- select_track --------------------------------------------------------
 
 
