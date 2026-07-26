@@ -288,6 +288,33 @@ def test_repair_never_steals_another_tracks_person() -> None:
     assert min(climber.detections) == 13
 
 
+def test_repair_rejects_other_lane_climber_absent_from_low_res() -> None:
+    # The diagnosed video (frames 375-382): on the gap frames BOTH climbers
+    # were missed by the low-res pass, so the left climber is absent from every
+    # avoid track. High-res recovers only the left climber (the right one fell /
+    # is occluded). She sits ~0.26 away horizontally -- within the isotropic
+    # jump budget (0.30) -- so the euclidean check attaches her. It must not:
+    # a climber stays in her lane, and 0.26 horizontal is the other lane.
+    scene = []
+    for f in range(9):
+        if 3 <= f <= 5:
+            scene.append([])  # both climbers undetected in low-res
+        else:
+            scene.append([person(0.67, 0.90 - 0.05 * f), person(0.41, 0.90 - 0.05 * f)])
+    tracks = build_tracks(frames_of(*scene))
+    right = select_track(tracks, ClimberSelector.RIGHT)
+    left = [t for t in tracks if t is not right]
+    assert right is not None and right.mean_x == pytest.approx(0.67, abs=0.02)
+
+    # High-res only recovers the left climber on the gap frames.
+    high_res = {f: [person(0.41, 0.90 - 0.05 * f)] for f in (3, 4, 5)}
+
+    repaired = repair_track_gaps(right, list(range(9)), lambda f: high_res[f], avoid=left)
+
+    assert repaired == 0
+    assert all(f not in right.detections for f in (3, 4, 5))
+
+
 def test_repair_fills_interior_gap() -> None:
     positions = {f: (0.4, 0.8 - 0.01 * f) for f in range(10) if f not in (4, 5)}
     track = make_track(positions)

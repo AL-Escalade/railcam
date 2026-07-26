@@ -24,6 +24,12 @@ MAX_JUMP_PER_FRAME = 0.15
 # Cap on gap-scaled jumps: stays below the typical distance between lanes,
 # so a track never teleports onto the other climber after a detection gap.
 MAX_JUMP_TOTAL = 0.30
+# Maximum horizontal deviation from the anchor when repairing a gap. A climber
+# stays in a near-fixed vertical lane, so x barely changes even across large
+# (vertical) gaps. Unlike the gap-scaled total budget, this stays fixed: it
+# rejects the other lane's climber, which the euclidean budget alone lets in
+# once the gap widens (see repair_track_gaps).
+MAX_LANE_DRIFT = 0.10
 # Minimum vertical displacement for a track to qualify as a climber.
 MIN_CLIMB_SPAN = 0.10
 # A climbing track must also cover at least this fraction of the best track's
@@ -172,6 +178,10 @@ def repair_track_gaps(
         best_distance = allowed
         for candidate in detect(frame_num):
             if _is_other_tracks_person(candidate, frame_num, avoid):
+                continue
+            # A climber stays in her lane: a large horizontal offset is the
+            # other climber, even when the euclidean distance fits the budget.
+            if abs(candidate.pelvis.x - anchor.x) > MAX_LANE_DRIFT:
                 continue
             distance = math.hypot(candidate.pelvis.x - anchor.x, candidate.pelvis.y - anchor.y)
             if distance <= best_distance:
