@@ -50,7 +50,7 @@ from railcam.pose import (
 from railcam.processing import (
     NoValidDetectionsError,
     interpolate_positions,
-    smooth_positions,
+    smooth_positions_zero_phase,
 )
 from railcam.tracking import (
     build_tracks,
@@ -475,7 +475,7 @@ def crop_video(
 
     # Process positions
     positions = interpolate_positions(analysis.detections)
-    positions = smooth_positions(positions)
+    positions = smooth_positions_zero_phase(positions)
 
     # Crop frames
     print("  Processing frames (scale then crop)...")

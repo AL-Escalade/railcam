@@ -8,6 +8,7 @@ from railcam.processing import (
     ProcessedPosition,
     interpolate_positions,
     smooth_positions,
+    smooth_positions_zero_phase,
 )
 
 
@@ -132,3 +133,56 @@ class TestSmoothPositions:
 
         # Third position continues smoothing
         assert result[2].x == 0.75  # 0.5 * 1.0 + 0.5 * 0.5
+
+
+class TestSmoothPositionsZeroPhase:
+    def test_no_directional_lag(self):
+        # An impulse centred at index 2. A causal single-pass EMA smears the
+        # response forward (its centre of mass lands past 2 -> the camera trails
+        # the climber). The forward-backward filter keeps it centred: no lag.
+        positions = [
+            ProcessedPosition(i, x, 0.0, False)
+            for i, x in enumerate([0.0, 0.0, 1.0, 0.0, 0.0])
+        ]
+
+        xs = [p.x for p in smooth_positions_zero_phase(positions, alpha=0.5)]
+        centroid = sum(i * x for i, x in enumerate(xs)) / sum(xs)
+
+        single = [p.x for p in smooth_positions(positions, alpha=0.5)]
+        single_centroid = sum(i * x for i, x in enumerate(single)) / sum(single)
+
+        assert xs[2] == max(xs)  # peak stays on the impulse
+        assert centroid == pytest.approx(2.0, abs=0.2)  # no forward lag
+        assert single_centroid > 2.4  # the causal filter clearly lags
+
+    def test_reduces_jerk_more_than_single_pass(self):
+        # Alternating (sawtooth) signal: the residual left after single-pass EMA
+        # is what shows up as camera micro-jitter; zero-phase must beat it.
+        positions = [
+            ProcessedPosition(i, x, 0.0, False)
+            for i, x in enumerate([0.0, 0.3, 0.0, 0.3, 0.0, 0.3, 0.0])
+        ]
+
+        single = [p.x for p in smooth_positions(positions, alpha=0.3)]
+        zero = [p.x for p in smooth_positions_zero_phase(positions, alpha=0.3)]
+
+        def jerk_rms(xs: list[float]) -> float:
+            j = [xs[i + 1] - 2 * xs[i] + xs[i - 1] for i in range(1, len(xs) - 1)]
+            return (sum(v * v for v in j) / len(j)) ** 0.5
+
+        assert jerk_rms(zero) < jerk_rms(single)
+
+    def test_preserves_frame_metadata(self):
+        positions = [
+            ProcessedPosition(10, 0.1, 0.2, False),
+            ProcessedPosition(11, 0.4, 0.5, True),
+            ProcessedPosition(12, 0.2, 0.3, False),
+        ]
+
+        result = smooth_positions_zero_phase(positions, alpha=0.3)
+
+        assert [p.frame_num for p in result] == [10, 11, 12]
+        assert [p.interpolated for p in result] == [False, True, False]
+
+    def test_empty_list(self):
+        assert smooth_positions_zero_phase([]) == []

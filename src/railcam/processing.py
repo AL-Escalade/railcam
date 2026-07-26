@@ -155,3 +155,20 @@ def smooth_positions(
         prev_y = smoothed_y
 
     return smoothed
+
+
+def smooth_positions_zero_phase(
+    positions: list[ProcessedPosition], alpha: float = DEFAULT_SMOOTHING_ALPHA
+) -> list[ProcessedPosition]:
+    """Apply the EMA forward then backward for zero-phase (lag-free) smoothing.
+
+    A single causal EMA lags the signal and leaves a residual sawtooth when
+    detections alternate between sources of slightly different bias (e.g. the
+    low-res and high-res detection passes). Running it in both directions
+    cancels the phase lag and roughly squares the attenuation, so the camera
+    path is markedly smoother without trailing behind the climber. Offline
+    batch processing makes the non-causal backward pass possible.
+    """
+    forward = smooth_positions(positions, alpha)
+    backward = smooth_positions(list(reversed(forward)), alpha)
+    return list(reversed(backward))
