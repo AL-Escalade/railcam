@@ -44,12 +44,25 @@ def test_expected_stage_count_includes_output_stages() -> None:
 
 
 def test_full_render_sequence_reaches_one() -> None:
+    # The stages a one-video render actually emits: cropping has no stage of
+    # its own since it runs as FFmpeg pulls frames.
     tracker = GlobalProgress(total_stages=expected_stage_count(1))
 
+    assert tracker.update("Detecting", 50, 100) < 1.0
     tracker.update("Detecting", 100, 100)
-    tracker.update("Processing", 100, 100)
-    assert tracker.update("Writing frames", 50, 100) < 1.0
-    tracker.update("Writing frames", 100, 100)
+    assert tracker.update("Encoding MP4", 50, 100) < 1.0
+    tracker.update("Encoding MP4", 100, 100)
+
+    assert tracker.update("Complete", 100, 100) == pytest.approx(1.0)
+
+
+def test_full_render_sequence_reaches_one_for_two_videos() -> None:
+    tracker = GlobalProgress(total_stages=expected_stage_count(2))
+
+    tracker.update("Detecting", 100, 100)
+    # Same stage name with a counter that restarts means the next video began
+    assert tracker.update("Detecting", 10, 100) < 1.0
+    tracker.update("Detecting", 100, 100)
     tracker.update("Encoding MP4", 100, 100)
 
     assert tracker.update("Complete", 100, 100) == pytest.approx(1.0)

@@ -31,5 +31,11 @@
 
 ## 5. Polish and docs
 
-- [ ] 5.1 End-to-end manual pass on Windows and macOS (load, sync preview, render mp4 and gif)
+- [x] 5.1a Automated end-to-end pass on Windows: load and scrub a video, read the
+  render options, build the equivalent CLI command, save and reload a two-video
+  project, and render both mp4 and gif through the real CLI path. Pose detection
+  was stubbed, since the fixtures are test patterns with no climber in them
+- [ ] 5.1b Manual pass on macOS, and visual/interactive verification on either
+  platform (scrubbing feel, synchronized preview playback, progress display).
+  Needs a human on the machine; not performed
 - [x] 5.2 Update README with `railcam-gui` installation and usage
