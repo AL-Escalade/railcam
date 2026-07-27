@@ -67,17 +67,29 @@ src/railcam/
 
 ### Processing Pipeline
 
-1. **Frame extraction** (`video.py`) - Extract frame range from video using OpenCV
-2. **Pose detection** (`pose.py`) - YOLOv8-pose detects all persons, selects target climber based on position (left/right/auto with proximity tracking)
-3. **Position processing** (`processing.py`) - Interpolate gaps where pelvis not detected, apply exponential smoothing
-4. **Zoom calculation** (`cropping.py`) - Compute scale factor so average torso height = 1/6 of output height
-5. **Cropping** (`cli.py:crop_video`) - Scale-then-crop approach: scale entire frame, crop around pelvis, add padding if needed
-6. **Composition** (`composition.py`) - For multi-video: time-synchronize (freeze last frame), compose horizontally
-7. **Output** (`output.py`) - Pipe raw BGR frames to FFmpeg stdin for MP4 (H.264) or GIF
+Each video is decoded **twice**, and no frame is ever retained. Cropping cannot
+happen during detection because it needs the smoothed position, which needs
+every detection first — so the two passes are a consequence of the data
+dependency, not a choice.
 
-Videos are processed one at a time (`cli.py:process_videos`): each is analyzed,
-cropped, then has its decoded source frames released before the next is read.
-Cropping never needs another video's analysis, since the multi-video zoom target
+**Pass 1 — analyze** (`cli.py:analyze_video`), one video at a time:
+
+1. **Frame extraction** (`video.py`) - Stream the frame range with OpenCV, releasing each frame after use
+2. **Pose detection** (`pose.py`) - YOLOv8-pose detects all persons per frame
+3. **Track selection** (`tracking.py`) - Group detections into motion tracks, pick the climber by upward movement
+4. **Gap repair** (`frame_source.py`) - Re-read only the frames the selected track is missing, by index, and retry at 1280px
+5. **Crop planning** (`cli.py:build_crop_plan`) - Interpolate and smooth positions, compute scale factor and output size. Pure: no pixels involved
+
+**Pass 2 — render**, driven lazily by the encoder pulling frames:
+
+6. **Cropping** (`cli.py:crop_frames`) - Re-decode the range and yield cropped frames one at a time: scale the frame, crop around the pelvis, pad if needed. Each decoded frame's number is checked against its planned position, since a silent desync would mis-frame everything
+7. **Composition** (`composition.py`) - For multi-video: a `FrameCursor` per video pulls its crop stream forward along the time-sync indices (which never decrease), and `compose_frame_row` emits one composed frame at a time
+8. **Output** (`output.py:generate_output_stream`) - Pipe raw BGR frames to FFmpeg stdin for MP4 (H.264) or GIF
+
+Cropping has no progress stage of its own: it runs as FFmpeg consumes frames,
+so the encoding bar covers it (`gui/progress.py:expected_stage_count`).
+
+Planning never needs another video's analysis, since the multi-video zoom target
 is the `TORSO_HEIGHT_RATIO` constant.
 
 ### Key Domain Concepts

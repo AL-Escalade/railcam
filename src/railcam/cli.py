@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Iterator
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
 
 from railcam import __version__
 from railcam.composition import (
+    FrameCursor,
     calculate_duration,
     calculate_max_duration,
     calculate_output_fps,
-    compose_frames_horizontal,
-    time_sync_frames,
+    compose_frame_row,
+    time_sync_frame_indices,
 )
 from railcam.cropping import (
     MAX_ZOOM_FACTOR,
@@ -28,6 +31,7 @@ from railcam.cropping import (
     resize_interpolation,
     scale_frame,
 )
+from railcam.frame_source import FrameSource
 from railcam.multi_video import (
     InputParseError,
     VideoInput,
@@ -36,7 +40,7 @@ from railcam.multi_video import (
 from railcam.output import (
     FFmpegNotFoundError,
     OutputGenerationError,
-    generate_output,
+    generate_output_stream,
     get_output_path,
     parse_output_format,
 )
@@ -52,6 +56,7 @@ from railcam.pose import (
 )
 from railcam.processing import (
     NoValidDetectionsError,
+    ProcessedPosition,
     interpolate_positions,
     smooth_positions_zero_phase,
 )
@@ -287,7 +292,6 @@ class VideoAnalysisResult:
 
     detections: list[DetectionResult]
     detections_by_frame: dict[int, DetectionResult]
-    frames_cache: dict[int, Any]  # np.ndarray
     avg_torso_height: float
     fps: float
     video_width: int
@@ -311,7 +315,6 @@ class _PoseDetectionResult:
 
     detections: list[DetectionResult]
     detections_by_frame: dict[int, DetectionResult]
-    frames_cache: dict[int, Any]
     torso_heights: list[float]
 
 
@@ -332,16 +335,16 @@ def _detect_poses_with_tracking(
         frame_count: Total number of frames to process.
 
     Returns:
-        Detection results, frame cache, and torso heights.
+        Detection results and torso heights. No frame is retained.
     """
-    frames_cache: dict[int, Any] = {}
     frame_results: list[MultiPersonDetectionResult] = []
 
+    # Frames are consumed one at a time and dropped: detection is the only
+    # thing that needs them here, and cropping re-reads the range later.
     for i, (frame_num, frame) in enumerate(
         extract_frames(video_input.path, video_input.start_frame, video_input.end_frame)
     ):
         frame_results.append(detector.detect_all_persons(frame, frame_num))
-        frames_cache[frame_num] = frame
         print_progress(i + 1, frame_count, "  Detecting")
 
     print()  # Newline after progress bar
@@ -356,14 +359,19 @@ def _detect_poses_with_tracking(
         missing = sum(1 for f in frame_nums if f not in selected.detections)
         if missing:
             print(f"  Repairing {missing} undetected frame(s) at high resolution...")
-            repaired = repair_track_gaps(
-                selected,
-                frame_nums,
-                lambda f: (
-                    detector.detect_all_persons(frames_cache[f], f, imgsz=HIGH_RES_IMGSZ).persons
-                ),
-                avoid=[track for track in tracks if track is not selected],
-            )
+            # Re-open the source only for the frames that need repairing;
+            # FrameSource seeks by index and decodes forward on long-GOP codecs
+            with closing(FrameSource(video_input.path)) as source:
+                repaired = repair_track_gaps(
+                    selected,
+                    frame_nums,
+                    lambda f: (
+                        detector.detect_all_persons(
+                            source.get_frame(f), f, imgsz=HIGH_RES_IMGSZ
+                        ).persons
+                    ),
+                    avoid=[track for track in tracks if track is not selected],
+                )
             print(f"  Recovered {repaired}/{missing} frame(s)")
 
     detections = track_to_detections(selected, [r.frame_num for r in frame_results])
@@ -371,7 +379,6 @@ def _detect_poses_with_tracking(
     return _PoseDetectionResult(
         detections=detections,
         detections_by_frame={d.frame_num: d for d in detections},
-        frames_cache=frames_cache,
         torso_heights=[d.torso.height for d in detections if d.torso is not None],
     )
 
@@ -416,7 +423,6 @@ def analyze_video(
     return VideoAnalysisResult(
         detections=pose_result.detections,
         detections_by_frame=pose_result.detections_by_frame,
-        frames_cache=pose_result.frames_cache,
         avg_torso_height=avg_torso,
         fps=metadata.fps,
         video_width=metadata.width,
@@ -425,186 +431,231 @@ def analyze_video(
     )
 
 
-def crop_video(
+@dataclass
+class CropPlan:
+    """Everything needed to crop a video, computed without touching a frame.
+
+    Separating the geometry from the pixels is what lets cropping run as a
+    stream, and it makes the arithmetic testable without fabricating frames.
+    """
+
+    output_width: int
+    output_height: int
+    scaled_width: int
+    scaled_height: int
+    scale_factor: float
+    needs_padding: bool
+    positions: list[ProcessedPosition]
+    fps: float
+    frame_count: int
+    debug: bool = False
+    target_width: int | None = None
+    target_height: int | None = None
+
+    @property
+    def final_size(self) -> tuple[int, int]:
+        """(width, height) of emitted frames, after any requested scaling.
+
+        Measured by scaling a probe rather than recomputing the arithmetic, so
+        it cannot drift from scale_frame's own even-dimension rounding.
+        """
+        if self.target_width is None and self.target_height is None:
+            return self.output_width, self.output_height
+        probe = np.zeros((self.output_height, self.output_width, 3), dtype=np.uint8)
+        scaled = scale_frame(probe, self.target_width, self.target_height)
+        return scaled.shape[1], scaled.shape[0]
+
+
+def build_crop_plan(
     analysis: VideoAnalysisResult,
     target_torso_ratio: float,
     debug: bool = False,
     target_width: int | None = None,
     target_height: int | None = None,
-) -> VideoProcessingResult:
-    """Crop a video based on analysis results and target torso ratio.
+) -> CropPlan:
+    """Compute the crop geometry from an analysis, without reading any frame.
 
-    Uses a scale-then-crop approach:
-    1. Scale the entire frame so the torso reaches the target size
-    2. Crop the region of interest centered on the pelvis
-    3. Add padding if the crop extends beyond the scaled frame bounds
-
-    Args:
-        analysis: Result from analyze_video().
-        target_torso_ratio: Target torso height as fraction of output (0-1).
-        debug: Enable debug overlay.
-        target_width: Optional output width.
-        target_height: Optional output height.
-
-    Returns:
-        VideoProcessingResult with cropped frames.
+    Uses a scale-then-crop approach: scale the whole frame so the torso reaches
+    the target size, then crop around the pelvis, padding if the scaled frame
+    is smaller than the crop.
     """
-    # Define output dimensions (base crop with 3:5 ratio)
     output_width, output_height = calculate_crop_dimensions(
         analysis.video_width, analysis.video_height
     )
 
-    # Calculate scale factor to achieve target torso ratio
     if analysis.avg_torso_height > 0:
         torso_px_source = analysis.avg_torso_height * analysis.video_height
         torso_px_target = target_torso_ratio * output_height
-        scale_factor = torso_px_target / torso_px_source
-        # Clamp to reasonable bounds
-        scale_factor = max(0.1, min(scale_factor, MAX_ZOOM_FACTOR))
+        scale_factor = max(0.1, min(torso_px_target / torso_px_source, MAX_ZOOM_FACTOR))
     else:
         scale_factor = 1.0
 
-    print(f"  Source video: {analysis.video_width}x{analysis.video_height}")
-    avg_torso = analysis.avg_torso_height
-    print(f"  Avg torso in source: {avg_torso:.3f} ({avg_torso:.1%})")
-    print(f"  Scale factor: {scale_factor:.2f}x (target torso: {target_torso_ratio:.1%})")
-    print(f"  Output size: {output_width}x{output_height}")
-
-    # Calculate scaled frame dimensions
     scaled_width = int(analysis.video_width * scale_factor)
     scaled_height = int(analysis.video_height * scale_factor)
-    print(f"  Scaled frame: {scaled_width}x{scaled_height}")
 
-    # Check if we need padding (scaled frame smaller than output)
-    needs_padding = scaled_width < output_width or scaled_height < output_height
-    if needs_padding:
-        print("  Padding will be added (scaled frame smaller than output)")
-
-    # Calculate effective torso ratio
-    torso_px_scaled = analysis.avg_torso_height * analysis.video_height * scale_factor
-    effective_ratio = torso_px_scaled / output_height
-    print(f"  Torso in output: {effective_ratio:.1%} ({torso_px_scaled:.1f}px)")
-
-    # Process positions
     positions = interpolate_positions(analysis.detections)
     positions = smooth_positions_zero_phase(positions)
 
-    # Crop frames
-    print("  Processing frames (scale then crop)...")
-    cropped_frames = []
-
-    for i, pos in enumerate(positions):
-        frame = analysis.frames_cache[pos.frame_num]
-
-        # 1. Scale the entire frame
-        if abs(scale_factor - 1.0) > 0.01:
-            scaled_frame = cv2.resize(
-                frame,
-                (scaled_width, scaled_height),
-                interpolation=resize_interpolation(scale_factor),
-            )
-        else:
-            scaled_frame = frame
-
-        # 2. Calculate pelvis position in scaled coordinates
-        pelvis_x = int(pos.x * scaled_width)
-        pelvis_y = int(pos.y * scaled_height)
-
-        # 3. Calculate ideal crop region centered on pelvis
-        ideal_x = pelvis_x - output_width // 2
-        ideal_y = pelvis_y - output_height // 2
-
-        # 4. Create output frame (may need padding)
-        if needs_padding:
-            # Create black canvas
-            if len(scaled_frame.shape) == 3:
-                output_frame = np.zeros(
-                    (output_height, output_width, scaled_frame.shape[2]),
-                    dtype=scaled_frame.dtype,
-                )
-            else:
-                output_frame = np.zeros(
-                    (output_height, output_width),
-                    dtype=scaled_frame.dtype,
-                )
-
-            # Calculate source region (clamp to scaled frame bounds)
-            src_x1 = max(0, ideal_x)
-            src_y1 = max(0, ideal_y)
-            src_x2 = min(scaled_width, ideal_x + output_width)
-            src_y2 = min(scaled_height, ideal_y + output_height)
-
-            # Calculate destination region in output
-            dst_x1 = src_x1 - ideal_x
-            dst_y1 = src_y1 - ideal_y
-            dst_x2 = dst_x1 + (src_x2 - src_x1)
-            dst_y2 = dst_y1 + (src_y2 - src_y1)
-
-            # Copy the visible portion
-            output_frame[dst_y1:dst_y2, dst_x1:dst_x2] = scaled_frame[src_y1:src_y2, src_x1:src_x2]
-            cropped = output_frame
-        else:
-            # No padding needed - just clamp and crop
-            x = max(0, min(ideal_x, scaled_width - output_width))
-            y = max(0, min(ideal_y, scaled_height - output_height))
-            cropped = scaled_frame[y : y + output_height, x : x + output_width]
-
-        # Apply debug overlay with scaled coordinates
-        if debug:
-            original_detection = analysis.detections_by_frame[pos.frame_num]
-            # Create a CropRegion in scaled space for coordinate transformation
-            if needs_padding:
-                # For padding case, use ideal coordinates (may be negative)
-                crop_region = CropRegion(
-                    x=ideal_x, y=ideal_y, width=output_width, height=output_height
-                )
-            else:
-                crop_region = CropRegion(x=x, y=y, width=output_width, height=output_height)
-            # Draw overlay using scaled dimensions as reference
-            cropped = draw_pose_overlay_on_crop(
-                cropped,
-                original_detection,
-                crop_region,
-                scaled_width,
-                scaled_height,
-            )
-
-        # Scale if requested
-        if target_width is not None or target_height is not None:
-            cropped = scale_frame(cropped, target_width, target_height)
-
-        cropped_frames.append(cropped)
-        print_progress(i + 1, len(positions), "  Processing")
-
-    print()  # Newline after progress bar
-
-    return VideoProcessingResult(
-        cropped_frames=cropped_frames,
+    return CropPlan(
+        output_width=output_width,
+        output_height=output_height,
+        scaled_width=scaled_width,
+        scaled_height=scaled_height,
+        scale_factor=scale_factor,
+        needs_padding=scaled_width < output_width or scaled_height < output_height,
+        positions=positions,
         fps=analysis.fps,
-        zoom_factor=scale_factor,
         frame_count=analysis.frame_count,
+        debug=debug,
+        target_width=target_width,
+        target_height=target_height,
     )
 
 
-def process_videos(
+def print_crop_plan(plan: CropPlan, analysis: VideoAnalysisResult, target_ratio: float) -> None:
+    """Report the planned geometry, as the pipeline has always done."""
+    print(f"  Source video: {analysis.video_width}x{analysis.video_height}")
+    avg_torso = analysis.avg_torso_height
+    print(f"  Avg torso in source: {avg_torso:.3f} ({avg_torso:.1%})")
+    print(f"  Scale factor: {plan.scale_factor:.2f}x (target torso: {target_ratio:.1%})")
+    print(f"  Output size: {plan.output_width}x{plan.output_height}")
+    print(f"  Scaled frame: {plan.scaled_width}x{plan.scaled_height}")
+    if plan.needs_padding:
+        print("  Padding will be added (scaled frame smaller than output)")
+    torso_px = analysis.avg_torso_height * analysis.video_height * plan.scale_factor
+    print(f"  Torso in output: {torso_px / plan.output_height:.1%} ({torso_px:.1f}px)")
+
+
+def _crop_one_frame(
+    plan: CropPlan,
+    frame: np.ndarray,
+    pos: ProcessedPosition,
+    detections_by_frame: dict[int, DetectionResult] | None,
+) -> np.ndarray:
+    """Scale, crop and optionally annotate a single frame."""
+    if abs(plan.scale_factor - 1.0) > 0.01:
+        scaled_frame = cv2.resize(
+            frame,
+            (plan.scaled_width, plan.scaled_height),
+            interpolation=resize_interpolation(plan.scale_factor),
+        )
+    else:
+        scaled_frame = frame
+
+    pelvis_x = int(pos.x * plan.scaled_width)
+    pelvis_y = int(pos.y * plan.scaled_height)
+    ideal_x = pelvis_x - plan.output_width // 2
+    ideal_y = pelvis_y - plan.output_height // 2
+
+    x, y = ideal_x, ideal_y
+    if plan.needs_padding:
+        if len(scaled_frame.shape) == 3:
+            output_frame = np.zeros(
+                (plan.output_height, plan.output_width, scaled_frame.shape[2]),
+                dtype=scaled_frame.dtype,
+            )
+        else:
+            output_frame = np.zeros(
+                (plan.output_height, plan.output_width), dtype=scaled_frame.dtype
+            )
+
+        src_x1 = max(0, ideal_x)
+        src_y1 = max(0, ideal_y)
+        src_x2 = min(plan.scaled_width, ideal_x + plan.output_width)
+        src_y2 = min(plan.scaled_height, ideal_y + plan.output_height)
+
+        dst_x1 = src_x1 - ideal_x
+        dst_y1 = src_y1 - ideal_y
+        dst_x2 = dst_x1 + (src_x2 - src_x1)
+        dst_y2 = dst_y1 + (src_y2 - src_y1)
+
+        output_frame[dst_y1:dst_y2, dst_x1:dst_x2] = scaled_frame[src_y1:src_y2, src_x1:src_x2]
+        cropped = output_frame
+    else:
+        x = max(0, min(ideal_x, plan.scaled_width - plan.output_width))
+        y = max(0, min(ideal_y, plan.scaled_height - plan.output_height))
+        cropped = scaled_frame[y : y + plan.output_height, x : x + plan.output_width]
+
+    if plan.debug and detections_by_frame is not None:
+        crop_region = CropRegion(x=x, y=y, width=plan.output_width, height=plan.output_height)
+        cropped = draw_pose_overlay_on_crop(
+            cropped,
+            detections_by_frame[pos.frame_num],
+            crop_region,
+            plan.scaled_width,
+            plan.scaled_height,
+        )
+
+    if plan.target_width is not None or plan.target_height is not None:
+        cropped = scale_frame(cropped, plan.target_width, plan.target_height)
+
+    return cropped
+
+
+def crop_frames(
+    plan: CropPlan,
+    video_input: VideoInput,
+    detections_by_frame: dict[int, DetectionResult] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> Iterator[np.ndarray]:
+    """Yield cropped frames, re-reading the source video.
+
+    This is the second decode pass. Cropping cannot happen during detection
+    because it needs the smoothed position, which needs every detection first.
+
+    The frame number of each decoded frame is checked against the position
+    about to be applied. A mismatch means the two passes disagree about the
+    range, which would otherwise mis-frame the whole output silently.
+
+    Raises:
+        VideoError: If a decoded frame does not match its planned position.
+    """
+    total = len(plan.positions)
+    for index, (frame_num, frame) in enumerate(
+        extract_frames(video_input.path, video_input.start_frame, video_input.end_frame)
+    ):
+        if index >= total:
+            break
+        pos = plan.positions[index]
+        if pos.frame_num != frame_num:
+            raise VideoError(
+                f"Frame mismatch while cropping {video_input.path}: read frame {frame_num} "
+                f"where the plan expects {pos.frame_num}. The source changed between passes."
+            )
+        yield _crop_one_frame(plan, frame, pos, detections_by_frame)
+        if on_progress:
+            on_progress(index + 1, total)
+
+
+@dataclass
+class VideoStream:
+    """A planned video whose cropped frames can be produced on demand."""
+
+    plan: CropPlan
+    video_input: VideoInput
+    detections_by_frame: dict[int, DetectionResult]
+
+    def frames(self, on_progress: Callable[[int, int], None] | None = None) -> Iterator[np.ndarray]:
+        """Produce the cropped frames, re-reading the source video."""
+        return crop_frames(self.plan, self.video_input, self.detections_by_frame, on_progress)
+
+
+def plan_videos(
     video_inputs: list[VideoInput],
     detector: PoseDetector,
     debug: bool = False,
     target_width: int | None = None,
     target_height: int | None = None,
-) -> list[VideoProcessingResult]:
-    """Analyze and crop each video in turn.
+) -> list[VideoStream]:
+    """Analyze each video in turn and plan its crop, without cropping yet.
 
-    Each video's decoded source frames are released as soon as its frames are
-    cropped, so only one video's frame cache is ever live. Cropping does not
-    need the other videos' analyses: the zoom target is TORSO_HEIGHT_RATIO for
-    multi-video output, and derived from the single video otherwise.
-
-    The cache is cleared here rather than inside crop_video, which does not own
-    the analysis it is given.
+    Analysis retains no frames, so this holds only detections and geometry
+    whatever the clip length. Planning does not need the other videos'
+    analyses: the zoom target is TORSO_HEIGHT_RATIO for multi-video output,
+    and derived from the single video otherwise.
     """
     is_multi_video = len(video_inputs) > 1
-    results: list[VideoProcessingResult] = []
+    streams: list[VideoStream] = []
 
     for i, video_input in enumerate(video_inputs):
         if is_multi_video:
@@ -614,14 +665,15 @@ def process_videos(
 
         if is_multi_video:
             # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
+            target_torso = TORSO_HEIGHT_RATIO
             if analysis.avg_torso_height > TORSO_HEIGHT_RATIO:
                 torso_pct = analysis.avg_torso_height
                 print(f"  Torso ({torso_pct:.1%}) > target ({TORSO_HEIGHT_RATIO:.1%}) - padding")
-            result = crop_video(analysis, TORSO_HEIGHT_RATIO, debug=debug)
+            plan = build_crop_plan(analysis, target_torso, debug=debug)
         else:
             # Single video: can't zoom out, so never target below the measured torso
             target_torso = max(TORSO_HEIGHT_RATIO, analysis.avg_torso_height)
-            result = crop_video(
+            plan = build_crop_plan(
                 analysis,
                 target_torso,
                 debug=debug,
@@ -629,10 +681,128 @@ def process_videos(
                 target_height=target_height,
             )
 
-        analysis.frames_cache.clear()
-        results.append(result)
+        print_crop_plan(plan, analysis, target_torso)
+        streams.append(
+            VideoStream(
+                plan=plan,
+                video_input=video_input,
+                detections_by_frame=analysis.detections_by_frame,
+            )
+        )
 
-    return results
+    return streams
+
+
+@dataclass
+class OutputStream:
+    """The frames to encode, with what the encoder needs to know up front."""
+
+    frames: Iterator[np.ndarray]
+    width: int
+    height: int
+    total_frames: int
+    fps: float
+
+
+def _measure(
+    frame_producer: Callable[[list[np.ndarray]], np.ndarray], sizes: list[tuple[int, int]]
+) -> tuple[int, int]:
+    """Run the composition on blank frames to learn the output size.
+
+    Measuring beats recomputing the arithmetic: the result cannot drift from
+    the height normalization and even-dimension rounding actually applied.
+    """
+    probes = [np.zeros((h, w, 3), dtype=np.uint8) for w, h in sizes]
+    composed = frame_producer(probes)
+    return composed.shape[1], composed.shape[0]
+
+
+def build_output_stream(
+    streams: list[VideoStream],
+    target_width: int | None = None,
+    target_height: int | None = None,
+) -> OutputStream:
+    """Build the stream of output frames, cropping lazily as it is consumed.
+
+    For a single video the cropped frames are the output. For several, each
+    video's crop stream is pulled through a cursor driven by the time
+    synchronization indices, and one composed row is emitted per output frame.
+    """
+    if len(streams) == 1:
+        plan = streams[0].plan
+        width, height = plan.final_size
+        return OutputStream(
+            frames=streams[0].frames(),
+            width=width,
+            height=height,
+            total_frames=len(plan.positions),
+            fps=plan.fps,
+        )
+
+    print("\n=== Synchronizing and composing ===")
+
+    # Durations come from the requested range, while the sync map is built from
+    # the frames actually decoded. The two differ when a range runs past the end
+    # of a file, which validate_frame_range lets through (it allows end ==
+    # total_frames, one past the last 0-indexed frame). Keeping both counts
+    # distinct preserves the existing output exactly; reconciling them would
+    # change rendered durations and belongs in its own change.
+    requested_counts = [s.plan.frame_count for s in streams]
+    decoded_counts = [len(s.plan.positions) for s in streams]
+    fps_list = [s.plan.fps for s in streams]
+    durations = [calculate_duration(fc, fps) for fc, fps in zip(requested_counts, fps_list)]
+    max_duration = calculate_max_duration(requested_counts, fps_list)
+
+    # LCM of all FPS gives each source frame an integer number of output
+    # frames, which is what keeps slow motion free of judder
+    output_fps = calculate_output_fps(fps_list)
+    index_maps = [
+        time_sync_frame_indices(count, fps, max_duration, output_fps)
+        for count, fps in zip(decoded_counts, fps_list)
+    ]
+    target_frame_count = min(len(indices) for indices in index_maps)
+
+    print(f"  Max duration: {max_duration:.2f}s")
+    fps_str = ", ".join(f"{f:.0f}" for f in fps_list)
+    print(f"  Output FPS: {output_fps:.0f} (LCM of {fps_str})")
+    print(f"  Target frame count: {target_frame_count}")
+
+    row_height = max(s.plan.output_height for s in streams)
+    row_height -= row_height % 2
+
+    for i, stream in enumerate(streams):
+        freeze = " (freezes)" if durations[i] < max_duration else ""
+        print(
+            f"  Video {i + 1}: {stream.plan.output_width}x{stream.plan.output_height}, "
+            f"{durations[i]:.2f}s @ {fps_list[i]:.1f}fps{freeze}"
+        )
+
+    def compose(parts: list[np.ndarray]) -> np.ndarray:
+        row = compose_frame_row(parts, row_height)
+        if target_width is not None or target_height is not None:
+            row = scale_frame(row, target_width, target_height)
+        return row
+
+    width, height = _measure(
+        compose, [(s.plan.output_width, s.plan.output_height) for s in streams]
+    )
+
+    def rows() -> Iterator[np.ndarray]:
+        cursors = [FrameCursor(s.frames()) for s in streams]
+        for output_index in range(target_frame_count):
+            parts = [
+                cursor.advance_to(indices[output_index])
+                for cursor, indices in zip(cursors, index_maps)
+            ]
+            yield compose(parts)
+
+    return OutputStream(
+        frames=rows(),
+        width=width,
+        height=height,
+        total_frames=target_frame_count,
+        fps=output_fps,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -655,11 +825,11 @@ def main(argv: list[str] | None = None) -> int:
     is_multi_video = len(video_inputs) > 1
 
     try:
-        # Process all videos, one at a time so only one frame cache is ever live
+        # Analyze and plan every video; no frames are retained
         print(f"Processing {len(video_inputs)} video(s)...")
 
         with PoseDetector(model_size=args.model) as detector:
-            results = process_videos(
+            streams = plan_videos(
                 video_inputs,
                 detector,
                 debug=args.debug,
@@ -667,60 +837,8 @@ def main(argv: list[str] | None = None) -> int:
                 target_height=args.height,
             )
 
-        # Prepare output frames
-        if is_multi_video:
-            # Multi-video: synchronize by TIME and compose side-by-side
-            print("\n=== Phase 3: Synchronizing and composing ===")
-
-            # Calculate durations and find max
-            frame_counts = [r.frame_count for r in results]
-            fps_list = [r.fps for r in results]
-            durations = [calculate_duration(fc, fps) for fc, fps in zip(frame_counts, fps_list)]
-            max_duration = calculate_max_duration(frame_counts, fps_list)
-
-            # Use LCM of all FPS for perfect frame timing (no judder in slow-motion)
-            output_fps = calculate_output_fps(fps_list)
-            target_frame_count = int(max_duration * output_fps)
-
-            print(f"  Max duration: {max_duration:.2f}s")
-            fps_str = ", ".join(f"{f:.0f}" for f in fps_list)
-            print(f"  Output FPS: {output_fps:.0f} (LCM of {fps_str})")
-            print(f"  Target frame count: {target_frame_count}")
-
-            # Time-sync each video (freeze on last frame when source ends)
-            synced_frame_lists = []
-            for i, result in enumerate(results):
-                synced = time_sync_frames(
-                    result.cropped_frames,
-                    result.fps,
-                    max_duration,
-                    output_fps,
-                )
-                synced_frame_lists.append(synced)
-                duration = durations[i]
-                # Show frame dimensions for debugging
-                frame_h, frame_w = result.cropped_frames[0].shape[:2]
-                fps = result.fps
-                freeze = " (freezes)" if duration < max_duration else ""
-                print(
-                    f"  Video {i + 1}: {frame_w}x{frame_h}, {duration:.2f}s @ {fps:.1f}fps{freeze}"
-                )
-
-            # Compose side-by-side
-            print("  Composing frames horizontally...")
-            output_frames = compose_frames_horizontal(synced_frame_lists)
-
-            # Scale if requested
-            if args.width is not None or args.height is not None:
-                print("  Scaling output...")
-                output_frames = [scale_frame(f, args.width, args.height) for f in output_frames]
-
-            # Use output FPS (max of all videos)
-            avg_fps = output_fps
-        else:
-            # Single video: frames already processed
-            output_frames = results[0].cropped_frames
-            avg_fps = results[0].fps
+        output = build_output_stream(streams, args.width, args.height)
+        avg_fps = output.fps
 
         # Generate output
         output_format = parse_output_format(args.format)
@@ -742,10 +860,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.speed != 1.0:
             print(f"  Speed: {args.speed}x ({avg_fps:.2f} fps -> {effective_fps:.2f} fps)")
 
-        generate_output(
-            output_frames,
+        # Cropping and composition happen lazily as FFmpeg consumes frames, so
+        # this one progress bar covers the whole output phase
+        generate_output_stream(
+            output.frames,
             output_path,
             effective_fps,
+            output.width,
+            output.height,
+            output.total_frames,
             output_format,
             on_progress=lambda c, t, s: print_progress(c, t, s),
         )
@@ -762,7 +885,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Size: {size_str}")
         if is_multi_video:
             print(f"  Videos combined: {len(video_inputs)}")
-            print(f"  Output frames: {len(output_frames)}")
+            print(f"  Output frames: {output.total_frames}")
 
         return 0
 

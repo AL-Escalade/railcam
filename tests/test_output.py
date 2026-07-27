@@ -143,3 +143,81 @@ class TestEncoding:
             generate_output([], tmp_path / "o.mp4", 30.0)
 
         assert commands == []
+
+
+class TestStreamingEncoding:
+    """Frames can arrive as a stream, with size and count supplied separately."""
+
+    def test_stream_pipes_the_same_bytes_as_a_list(self, monkeypatch, tmp_path) -> None:
+        frames = _frames(count=3, width=4, height=3)
+
+        from_list = _FakeProcess()
+        _patch_ffmpeg(monkeypatch, from_list)
+        generate_output(frames, tmp_path / "a.mp4", 30.0, OutputFormat.MP4)
+
+        from_stream = _FakeProcess()
+        _patch_ffmpeg(monkeypatch, from_stream)
+        output.generate_output_stream(
+            iter(frames), tmp_path / "b.mp4", 30.0, width=4, height=3, total_frames=3
+        )
+
+        assert bytes(from_stream.written) == bytes(from_list.written)
+
+    def test_stream_builds_the_same_command_as_a_list(self, monkeypatch, tmp_path) -> None:
+        list_commands = _patch_ffmpeg(monkeypatch, _FakeProcess())
+        generate_output(_frames(count=2, width=4, height=3), tmp_path / "a.mp4", 30.0)
+
+        stream_commands = _patch_ffmpeg(monkeypatch, _FakeProcess())
+        output.generate_output_stream(
+            iter(_frames(count=2, width=4, height=3)),
+            tmp_path / "a.mp4",
+            30.0,
+            width=4,
+            height=3,
+            total_frames=2,
+        )
+
+        assert stream_commands[0] == list_commands[0]
+
+    def test_progress_counts_against_the_supplied_total(self, monkeypatch, tmp_path) -> None:
+        _patch_ffmpeg(monkeypatch, _FakeProcess())
+        seen: list[tuple[int, int]] = []
+
+        output.generate_output_stream(
+            iter(_frames(count=3)),
+            tmp_path / "o.mp4",
+            30.0,
+            width=4,
+            height=3,
+            total_frames=3,
+            on_progress=lambda current, total, _stage: seen.append((current, total)),
+        )
+
+        assert seen[:3] == [(1, 3), (2, 3), (3, 3)]
+
+    def test_short_stream_raises(self, monkeypatch, tmp_path) -> None:
+        _patch_ffmpeg(monkeypatch, _FakeProcess())
+
+        with pytest.raises(OutputGenerationError, match="2 of 5"):
+            output.generate_output_stream(
+                iter(_frames(count=2)),
+                tmp_path / "o.mp4",
+                30.0,
+                width=4,
+                height=3,
+                total_frames=5,
+            )
+
+    def test_ffmpeg_failure_wins_over_a_short_stream(self, monkeypatch, tmp_path) -> None:
+        # A dead FFmpeg truncates the stream; its own error is the useful one
+        _patch_ffmpeg(monkeypatch, _FakeProcess(returncode=1, stderr=b"encoder exploded"))
+
+        with pytest.raises(OutputGenerationError, match="encoder exploded"):
+            output.generate_output_stream(
+                iter(_frames(count=1)),
+                tmp_path / "o.mp4",
+                30.0,
+                width=4,
+                height=3,
+                total_frames=9,
+            )

@@ -4,11 +4,13 @@ import numpy as np
 import pytest
 
 from railcam.composition import (
+    FrameCursor,
     calculate_duration,
     calculate_max_duration,
     calculate_output_dimensions,
     calculate_output_fps,
     calculate_target_frame_count,
+    compose_frame_row,
     compose_frames_horizontal,
     extend_frame_indices,
     extend_frames,
@@ -627,3 +629,82 @@ class TestMultiVideoTimeSyncIntegration:
         assert len(composed) == 600
         assert composed[0].shape[0] == 100  # Height preserved
         assert composed[0].shape[1] == 60 * 3  # Width = 3 videos side by side
+
+
+class TestComposeFrameRow:
+    """One composed output frame, the primitive the list version is built on."""
+
+    def _frame(self, height: int, width: int, value: int) -> np.ndarray:
+        return np.full((height, width, 3), value, dtype=np.uint8)
+
+    def test_concatenates_horizontally(self) -> None:
+        row = compose_frame_row([self._frame(10, 4, 1), self._frame(10, 6, 2)], 10)
+
+        assert row.shape == (10, 10, 3)
+
+    def test_normalizes_heights(self) -> None:
+        row = compose_frame_row([self._frame(10, 4, 1), self._frame(20, 8, 2)], 10)
+
+        assert row.shape[0] == 10
+
+    def test_matches_the_list_based_composition(self) -> None:
+        left = [self._frame(10, 4, i) for i in range(3)]
+        right = [self._frame(10, 6, i + 10) for i in range(3)]
+
+        from_list = compose_frames_horizontal([left, right])
+        streamed = [compose_frame_row([left[i], right[i]], 10) for i in range(3)]
+
+        for a, b in zip(from_list, streamed):
+            assert np.array_equal(a, b)
+
+
+class TestFrameCursor:
+    """Pulls a crop stream forward, repeating frames the sync map repeats."""
+
+    def _stream(self, count: int):
+        return (np.full((2, 2, 3), i, dtype=np.uint8) for i in range(count))
+
+    def test_serves_the_first_frame(self) -> None:
+        cursor = FrameCursor(self._stream(3))
+
+        assert cursor.advance_to(0)[0, 0, 0] == 0
+
+    def test_advances_forward(self) -> None:
+        cursor = FrameCursor(self._stream(3))
+        cursor.advance_to(0)
+
+        assert cursor.advance_to(2)[0, 0, 0] == 2
+
+    def test_repeats_without_advancing(self) -> None:
+        pulled = []
+
+        def counting_stream():
+            for i in range(3):
+                pulled.append(i)
+                yield np.full((2, 2, 3), i, dtype=np.uint8)
+
+        cursor = FrameCursor(counting_stream())
+        cursor.advance_to(0)
+        again = cursor.advance_to(0)
+
+        assert again[0, 0, 0] == 0
+        assert pulled == [0]
+
+    def test_freezes_past_the_end(self) -> None:
+        cursor = FrameCursor(self._stream(2))
+        cursor.advance_to(1)
+
+        assert cursor.advance_to(5)[0, 0, 0] == 1
+
+    def test_going_backwards_raises(self) -> None:
+        cursor = FrameCursor(self._stream(3))
+        cursor.advance_to(2)
+
+        with pytest.raises(ValueError, match="backwards"):
+            cursor.advance_to(1)
+
+    def test_empty_stream_raises(self) -> None:
+        cursor = FrameCursor(iter([]))
+
+        with pytest.raises(ValueError, match="no frames"):
+            cursor.advance_to(0)
