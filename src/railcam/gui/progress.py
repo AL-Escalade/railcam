@@ -25,10 +25,12 @@ def split_output_chunks(chunk: str) -> list[str]:
 def expected_stage_count(video_count: int) -> int:
     """Number of CLI progress-bar stages for a render.
 
-    Per video: Detecting and Processing; then, once for the output:
-    Writing frames and Encoding (see cli.main and output.generate_output).
+    One Detecting stage per video, then Encoding and Complete once for the
+    output (see cli.main and output.generate_output_stream). Cropping has no
+    stage of its own: it happens lazily as FFmpeg consumes frames, so the
+    encoding bar already covers it.
     """
-    return 2 * video_count + 2
+    return video_count + 2
 
 
 class GlobalProgress:

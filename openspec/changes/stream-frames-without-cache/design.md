@@ -89,6 +89,20 @@ and are expressed in terms of `compose_frame_row` and the streaming encoder.
 This is not compatibility for its own sake: their existing tests become the
 evidence that the streamed path produces the same result as the list path.
 
+### Decision: durations keep using the requested frame count
+
+Multi-video duration was computed from the requested range while the
+synchronization map was built from the frames actually decoded. The two differ
+when a range runs past the end of a file, which `validate_frame_range` allows:
+it rejects `end > total_frames`, but frame numbers are 0-indexed, so
+`end == total_frames` is already one past the last frame.
+
+Making both use the decoded count changed rendered output by one frame. Since
+byte-identical output is this change's acceptance criterion, both counts are
+kept distinct and the inconsistency preserved. The off-by-one in
+`validate_frame_range` is real and worth fixing, but changing rendered durations
+belongs in its own change, not in a memory refactor.
+
 ## Risks / Trade-offs
 
 - Renders get slower by one sequential decode per video → measured at a small

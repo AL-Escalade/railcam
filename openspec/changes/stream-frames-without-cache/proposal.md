@@ -35,9 +35,20 @@ repair, which touches a few dozen frames at most.
 - Affected code: `src/railcam/cli.py`, `src/railcam/composition.py`,
   `src/railcam/output.py`, `src/railcam/frame_source.py` (moved),
   `src/railcam/gui/frame_source.py` (re-export)
-- Peak memory becomes one source frame plus one cropped frame per video, plus
-  one composed frame: roughly 50 MB at 4K regardless of clip length, against
-  7.5 GB before.
-- Each video is decoded twice instead of once. Measured on a synthetic 4K clip:
-  19.6 ms per frame sequential, so about 6 s per 300 frames, against 30-150 s
-  for the detection pass on the same range.
+- Frame residency becomes one source frame plus one cropped frame per video,
+  plus one composed frame, independent of clip length.
+- Each video is decoded twice instead of once.
+
+Measured end to end on a synthetic 4K clip, with a deterministic stand-in for
+the detector so the runs are comparable. Peak RSS covers the whole process tree,
+including FFmpeg; the interpreter with torch and ultralytics loaded is already
+242 MB before any frame is read.
+
+| Render | Peak RSS before | Peak RSS after | Wall before | Wall after |
+| --- | --- | --- | --- | --- |
+| One 4K video, 300 frames | 17443 MB | 2001 MB | 25.8 s | 29.4 s |
+| Two 4K videos, 200 frames each | 18974 MB | 3244 MB | 28.0 s | 28.2 s |
+
+Output is byte-identical across single video, scaled, GIF, debug overlay,
+two-video, three-video, scaled multi-video, slow motion, and left/right climber
+selection.

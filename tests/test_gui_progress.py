@@ -37,9 +37,10 @@ def test_parses_writing_frames_progress_line() -> None:
 
 
 def test_expected_stage_count_includes_output_stages() -> None:
-    # Per video: Detecting + Processing; then Writing frames + Encoding
-    assert expected_stage_count(1) == 4
-    assert expected_stage_count(2) == 6
+    # Per video: Detecting. Then, once: Encoding and Complete. Cropping no
+    # longer has a stage of its own, since it happens as FFmpeg consumes frames.
+    assert expected_stage_count(1) == 3
+    assert expected_stage_count(2) == 4
 
 
 def test_full_render_sequence_reaches_one() -> None:
@@ -100,3 +101,20 @@ def test_split_output_chunks_handles_carriage_returns() -> None:
     assert "  Detecting: [░] 1.0% (2/220)" in lines
     assert "  Detecting: [█] 50.0% (110/220)" in lines
     assert "  done" in lines
+
+
+def test_cli_progress_lines_are_parseable() -> None:
+    """The CLI's bar format is the GUI's input; they must not drift apart."""
+    import io
+    from contextlib import redirect_stdout
+
+    from railcam.cli import print_progress
+
+    for stage in ("  Detecting", "  Encoding MP4", "  Encoding GIF", "Complete"):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            print_progress(3, 10, stage)
+
+        parsed = parse_progress(buffer.getvalue())
+
+        assert parsed == (stage.strip(), 3, 10)

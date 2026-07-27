@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 
 import cv2
 import numpy as np
@@ -296,6 +297,65 @@ def normalize_frame_height(frame: np.ndarray, target_height: int) -> np.ndarray:
     )
 
 
+def compose_frame_row(frames: list[np.ndarray], target_height: int) -> np.ndarray:
+    """Compose one output frame from one cropped frame per video.
+
+    Frames are normalized to a common height and concatenated horizontally.
+    This is the primitive the streamed pipeline emits one at a time; the
+    list-based composition below is expressed in terms of it.
+    """
+    normalized = [normalize_frame_height(frame, target_height) for frame in frames]
+    composed = np.concatenate(normalized, axis=1)
+
+    # Ensure even width
+    if composed.shape[1] % 2 != 0:
+        composed = composed[:, :-1]
+    return composed
+
+
+class FrameCursor:
+    """Pulls a stream of cropped frames forward on demand.
+
+    Time synchronization maps an output frame index to a source frame index,
+    repeating indices when a video is slower than the output or has ended.
+    Those indices never decrease, which is what lets a one-way stream serve
+    them: the cursor advances when the index moves and repeats its current
+    frame when it does not.
+
+    A backwards index would mean the synchronization model changed under this
+    assumption, so it raises rather than silently serving a wrong frame.
+    """
+
+    def __init__(self, frames: Iterator[np.ndarray]) -> None:
+        self._frames = frames
+        self._index = -1
+        self._current: np.ndarray | None = None
+        self._exhausted = False
+
+    def advance_to(self, index: int) -> np.ndarray:
+        """Return the frame at `index`, pulling the stream forward as needed.
+
+        Raises:
+            ValueError: If `index` goes backwards, or the stream had no frames.
+        """
+        if self._current is not None and index < self._index:
+            raise ValueError(
+                f"Frame cursor cannot move backwards: asked for {index} after {self._index}"
+            )
+
+        while self._index < index and not self._exhausted:
+            try:
+                self._current = next(self._frames)
+                self._index += 1
+            except StopIteration:
+                # Source ended: freeze on the last frame, as time sync intends
+                self._exhausted = True
+
+        if self._current is None:
+            raise ValueError("Frame cursor received no frames")
+        return self._current
+
+
 def compose_frames_horizontal(
     frame_lists: list[list[np.ndarray]],
     target_height: int | None = None,
@@ -333,25 +393,10 @@ def compose_frames_horizontal(
     # Ensure even height
     target_height = target_height - (target_height % 2)
 
-    composed_frames = []
-    for frame_idx in range(frame_count):
-        # Normalize heights for this frame index
-        normalized_frames = []
-        for video_frames in frame_lists:
-            frame = video_frames[frame_idx]
-            normalized = normalize_frame_height(frame, target_height)
-            normalized_frames.append(normalized)
-
-        # Concatenate horizontally
-        composed = np.concatenate(normalized_frames, axis=1)
-
-        # Ensure even width
-        if composed.shape[1] % 2 != 0:
-            composed = composed[:, :-1]
-
-        composed_frames.append(composed)
-
-    return composed_frames
+    return [
+        compose_frame_row([video_frames[frame_idx] for video_frames in frame_lists], target_height)
+        for frame_idx in range(frame_count)
+    ]
 
 
 def calculate_output_dimensions(
