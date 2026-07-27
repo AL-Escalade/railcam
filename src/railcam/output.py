@@ -105,7 +105,7 @@ def build_gif_command(output_path: Path, fps: float, width: int, height: int) ->
     ]
 
 
-def _read_stderr(process: subprocess.Popen, handle: IO[bytes]) -> bytes:
+def _read_stderr(process: subprocess.Popen[bytes], handle: IO[bytes]) -> bytes:
     """Wait for the process and return what it wrote to its error stream."""
     process.wait()
     handle.seek(0)
