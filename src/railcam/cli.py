@@ -437,6 +437,10 @@ class CropPlan:
 
     Separating the geometry from the pixels is what lets cropping run as a
     stream, and it makes the arithmetic testable without fabricating frames.
+
+    There is deliberately no frame count beside `positions`: the two once
+    disagreed when a requested range ran past the end of a file, which skewed
+    multi-video durations. The positions are the only count.
     """
 
     output_width: int
@@ -447,7 +451,6 @@ class CropPlan:
     needs_padding: bool
     positions: list[ProcessedPosition]
     fps: float
-    frame_count: int
     debug: bool = False
     target_width: int | None = None
     target_height: int | None = None
@@ -505,7 +508,6 @@ def build_crop_plan(
         needs_padding=scaled_width < output_width or scaled_height < output_height,
         positions=positions,
         fps=analysis.fps,
-        frame_count=analysis.frame_count,
         debug=debug,
         target_width=target_width,
         target_height=target_height,
@@ -741,17 +743,14 @@ def build_output_stream(
 
     print("\n=== Synchronizing and composing ===")
 
-    # Durations come from the requested range, while the sync map is built from
-    # the frames actually decoded. The two differ when a range runs past the end
-    # of a file, which validate_frame_range lets through (it allows end ==
-    # total_frames, one past the last 0-indexed frame). Keeping both counts
-    # distinct preserves the existing output exactly; reconciling them would
-    # change rendered durations and belongs in its own change.
-    requested_counts = [s.plan.frame_count for s in streams]
+    # Durations and the sync map both come from the frames actually decoded.
+    # The requested range can still overstate it when container metadata is
+    # wrong, and a duration longer than the frames that exist would stretch the
+    # render by freezing on the last frame.
     decoded_counts = [len(s.plan.positions) for s in streams]
     fps_list = [s.plan.fps for s in streams]
-    durations = [calculate_duration(fc, fps) for fc, fps in zip(requested_counts, fps_list)]
-    max_duration = calculate_max_duration(requested_counts, fps_list)
+    durations = [calculate_duration(fc, fps) for fc, fps in zip(decoded_counts, fps_list)]
+    max_duration = calculate_max_duration(decoded_counts, fps_list)
 
     # LCM of all FPS gives each source frame an integer number of output
     # frames, which is what keeps slow motion free of judder
