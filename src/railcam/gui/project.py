@@ -15,6 +15,23 @@ from typing import Any
 PROJECT_VERSION = 1
 VALID_CLIMBERS = ("auto", "left", "right")
 
+# Mirrors railcam.pose.MODEL_SIZES / DEFAULT_MODEL_SIZE as plain strings, the
+# same way VALID_CLIMBERS mirrors ClimberSelector: importing railcam.pose here
+# would pull ultralytics and torch into the GUI's model layer.
+VALID_MODELS = ("n", "s", "m", "l", "x")
+DEFAULT_MODEL_SIZE = "s"
+
+# Labels for the model selector, naming both the trade-off and the CLI value.
+# The panel displays the equivalent CLI command, so a user who picks "Précis"
+# must be able to recognise the `--model m` they end up copying.
+MODEL_LABELS = (
+    ("n", "Rapide (n)"),
+    ("s", "Équilibré (s)"),
+    ("m", "Précis (m)"),
+    ("l", "Très précis (l)"),
+    ("x", "Maximal (x)"),
+)
+
 
 class ProjectError(Exception):
     """Error loading or saving a project file."""
@@ -38,6 +55,7 @@ class RenderOptions:
     height: int | None = None
     speed: float = 1.0
     debug: bool = False
+    model: str = DEFAULT_MODEL_SIZE
 
 
 @dataclass
@@ -67,6 +85,7 @@ class Project:
                 "height": self.render.height,
                 "speed": self.render.speed,
                 "debug": self.render.debug,
+                "model": self.render.model,
             },
             "output_path": str(self.output_path) if self.output_path is not None else None,
         }
@@ -141,6 +160,9 @@ def _load_video_entry(entry: Any, project_dir: Path) -> VideoEntry:
 
 def _load_render_options(data: dict[str, Any]) -> RenderOptions:
     defaults = RenderOptions()
+    model = str(data.get("model", defaults.model))
+    if model not in VALID_MODELS:
+        raise ProjectError(f"Invalid model size: {model!r}. Valid values are {VALID_MODELS}.")
     try:
         height_raw = data.get("height", defaults.height)
         return RenderOptions(
@@ -148,6 +170,7 @@ def _load_render_options(data: dict[str, Any]) -> RenderOptions:
             height=int(height_raw) if height_raw is not None else None,
             speed=float(data.get("speed", defaults.speed)),
             debug=bool(data.get("debug", defaults.debug)),
+            model=model,
         )
     except (TypeError, ValueError) as e:
         raise ProjectError(f"Invalid project file: bad render options ({e})") from e

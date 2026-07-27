@@ -30,7 +30,7 @@ from railcam.gui.progress import (
     parse_progress,
     split_output_chunks,
 )
-from railcam.gui.project import Project, RenderOptions
+from railcam.gui.project import MODEL_LABELS, Project, RenderOptions
 from railcam.gui.render import build_cli_args, format_cli_command, resolve_railcam_command
 
 
@@ -131,6 +131,18 @@ class RenderPanel(QWidget):
         options_row.addWidget(self.speed_spin)
 
         options_row.addSpacing(10)
+        options_row.addWidget(QLabel("Détection :"))
+        self.model_combo = QComboBox()
+        for value, label in MODEL_LABELS:
+            self.model_combo.addItem(label, value)
+        self.model_combo.setCurrentIndex(self.model_combo.findData(RenderOptions().model))
+        self.model_combo.setToolTip(
+            "Taille du modèle de détection de pose. Un modèle plus léger accélère "
+            "nettement le rendu ; les frames manquées sont rattrapées en haute résolution."
+        )
+        options_row.addWidget(self.model_combo)
+
+        options_row.addSpacing(10)
         self.debug_check = QCheckBox("Debug (squelette)")
         options_row.addWidget(self.debug_check)
 
@@ -149,6 +161,7 @@ class RenderPanel(QWidget):
             self.format_combo.currentIndexChanged,
             self.height_spin.valueChanged,
             self.speed_spin.valueChanged,
+            self.model_combo.currentIndexChanged,
             self.debug_check.toggled,
             self.output_edit.textChanged,
         ):
@@ -212,6 +225,7 @@ class RenderPanel(QWidget):
             height=height if height > 0 else None,
             speed=round(self.speed_spin.value(), 4),
             debug=self.debug_check.isChecked(),
+            model=str(self.model_combo.currentData()),
         )
 
     def output_path(self, project: Project) -> Path | None:
@@ -228,6 +242,9 @@ class RenderPanel(QWidget):
         self.format_combo.setCurrentText(options.format)
         self.height_spin.setValue(options.height or 0)
         self.speed_spin.setValue(options.speed)
+        model_index = self.model_combo.findData(options.model)
+        if model_index >= 0:
+            self.model_combo.setCurrentIndex(model_index)
         self.debug_check.setChecked(options.debug)
         self.output_edit.setText(str(output_path) if output_path else "")
 

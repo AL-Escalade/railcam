@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import IO, Callable
 
-import cv2
 import numpy as np
 
 
@@ -43,27 +43,124 @@ def check_ffmpeg() -> None:
         )
 
 
-def _write_frames_to_temp(
-    frames: list[np.ndarray],
-    temp_path: Path,
-    on_progress: Callable[[int, int, str], None] | None = None,
-) -> Path:
-    """Write frames to temporary PNG files.
+def _raw_input_args(fps: float, width: int, height: int) -> list[str]:
+    """FFmpeg arguments reading BGR frames from standard input.
 
-    Returns the frame pattern path for FFmpeg.
+    `-nostats -loglevel error` keeps the captured error stream small; frames are
+    OpenCV BGR arrays, which map directly onto `rawvideo` with `bgr24`.
     """
-    frame_pattern = temp_path / "frame_%05d.png"
+    return [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-nostats",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-s",
+        f"{width}x{height}",
+        "-framerate",
+        str(fps),
+        "-i",
+        "pipe:0",
+    ]
+
+
+def build_mp4_command(output_path: Path, fps: float, width: int, height: int) -> list[str]:
+    """Build the FFmpeg command encoding piped frames to H.264 MP4."""
+    return [
+        *_raw_input_args(fps, width, height),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        str(output_path),
+    ]
+
+
+def build_gif_command(output_path: Path, fps: float, width: int, height: int) -> list[str]:
+    """Build the FFmpeg command encoding piped frames to a palette-optimized GIF.
+
+    The two-command palette flow reads its input twice, which a pipe cannot do.
+    Splitting the stream inside one invocation keeps the same palette settings
+    while reading standard input a single time.
+    """
+    palette_chain = (
+        "[0:v]split[a][b];"
+        "[a]palettegen=stats_mode=diff[p];"
+        "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle"
+    )
+    return [
+        *_raw_input_args(fps, width, height),
+        "-filter_complex",
+        palette_chain,
+        str(output_path),
+    ]
+
+
+def _read_stderr(process: subprocess.Popen, handle: IO[bytes]) -> bytes:
+    """Wait for the process and return what it wrote to its error stream."""
+    process.wait()
+    handle.seek(0)
+    return handle.read()
+
+
+def _encode_frames(
+    frames: list[np.ndarray],
+    command: list[str],
+    stage: str,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> None:
+    """Pipe frames into FFmpeg, raising with its error output on failure.
+
+    The error stream goes to an anonymous temporary file rather than a pipe:
+    a pipe FFmpeg fills while we are still writing frames would deadlock.
+    """
     total_frames = len(frames)
 
-    for i, frame in enumerate(frames):
-        frame_file = temp_path / f"frame_{i:05d}.png"
-        # OpenCV uses BGR, write directly
-        cv2.imwrite(str(frame_file), frame)
+    with tempfile.TemporaryFile() as error_log:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=error_log,
+        )
+        stdin = process.stdin
+        assert stdin is not None
 
-        if on_progress:
-            on_progress(i + 1, total_frames, "Writing frames")
+        try:
+            for i, frame in enumerate(frames):
+                if process.poll() is not None:
+                    # FFmpeg gave up early; stop rather than block on the pipe
+                    break
+                stdin.write(np.ascontiguousarray(frame).tobytes())
+                if on_progress:
+                    on_progress(i + 1, total_frames, stage)
+        except (BrokenPipeError, OSError):
+            # FFmpeg closed the pipe; its error output explains why
+            pass
+        finally:
+            with contextlib.suppress(BrokenPipeError, OSError):
+                stdin.close()
 
-    return frame_pattern
+        stderr = _read_stderr(process, error_log)
+
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", errors="replace").strip()
+        raise OutputGenerationError(f"FFmpeg failed ({process.returncode}): {message}")
+
+
+def _frame_size(frames: list[np.ndarray]) -> tuple[int, int]:
+    """Return (width, height) of the frames, taken from the first one."""
+    height, width = frames[0].shape[:2]
+    return width, height
 
 
 def generate_gif(
@@ -76,68 +173,20 @@ def generate_gif(
 
     Uses FFmpeg's palette generation for high-quality output.
     """
-    check_ffmpeg()
-
     if not frames:
         raise OutputGenerationError("No frames to process")
+    check_ffmpeg()
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
+    width, height = _frame_size(frames)
+    _encode_frames(
+        frames,
+        build_gif_command(output_path, fps, width, height),
+        "Encoding GIF",
+        on_progress,
+    )
 
-        # Write frames to temporary PNG files
-        frame_pattern = _write_frames_to_temp(frames, temp_path, on_progress)
-        total_frames = len(frames)
-
-        # Generate palette for optimal colors
-        palette_path = temp_path / "palette.png"
-        palette_cmd = [
-            "ffmpeg",
-            "-y",
-            "-framerate",
-            str(fps),
-            "-i",
-            str(frame_pattern),
-            "-vf",
-            "palettegen=stats_mode=diff",
-            str(palette_path),
-        ]
-
-        result = subprocess.run(
-            palette_cmd,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise OutputGenerationError(f"Palette generation failed: {result.stderr}")
-
-        if on_progress:
-            on_progress(total_frames, total_frames, "Generating palette")
-
-        # Generate GIF using the palette
-        gif_cmd = [
-            "ffmpeg",
-            "-y",
-            "-framerate",
-            str(fps),
-            "-i",
-            str(frame_pattern),
-            "-i",
-            str(palette_path),
-            "-lavfi",
-            "paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
-            str(output_path),
-        ]
-
-        result = subprocess.run(
-            gif_cmd,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise OutputGenerationError(f"GIF generation failed: {result.stderr}")
-
-        if on_progress:
-            on_progress(total_frames, total_frames, "Complete")
+    if on_progress:
+        on_progress(len(frames), len(frames), "Complete")
 
 
 def generate_mp4(
@@ -150,50 +199,20 @@ def generate_mp4(
 
     Uses H.264 encoding with yuv420p pixel format for broad compatibility.
     """
-    check_ffmpeg()
-
     if not frames:
         raise OutputGenerationError("No frames to process")
+    check_ffmpeg()
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
+    width, height = _frame_size(frames)
+    _encode_frames(
+        frames,
+        build_mp4_command(output_path, fps, width, height),
+        "Encoding MP4",
+        on_progress,
+    )
 
-        # Write frames to temporary PNG files
-        frame_pattern = _write_frames_to_temp(frames, temp_path, on_progress)
-        total_frames = len(frames)
-
-        if on_progress:
-            on_progress(total_frames, total_frames, "Encoding MP4")
-
-        # Generate MP4 using H.264
-        mp4_cmd = [
-            "ffmpeg",
-            "-y",
-            "-framerate",
-            str(fps),
-            "-i",
-            str(frame_pattern),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "23",
-            "-pix_fmt",
-            "yuv420p",
-            str(output_path),
-        ]
-
-        result = subprocess.run(
-            mp4_cmd,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise OutputGenerationError(f"MP4 generation failed: {result.stderr}")
-
-        if on_progress:
-            on_progress(total_frames, total_frames, "Complete")
+    if on_progress:
+        on_progress(len(frames), len(frames), "Complete")
 
 
 def generate_output(

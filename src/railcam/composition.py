@@ -7,6 +7,8 @@ import math
 import cv2
 import numpy as np
 
+from railcam.cropping import resize_interpolation
+
 
 def calculate_output_fps(fps_list: list[float]) -> float:
     """Calculate optimal output FPS using LCM (Least Common Multiple).
@@ -287,7 +289,11 @@ def normalize_frame_height(frame: np.ndarray, target_height: int) -> np.ndarray:
     new_width = new_width - (new_width % 2)
     target_height = target_height - (target_height % 2)
 
-    return cv2.resize(frame, (new_width, target_height), interpolation=cv2.INTER_LANCZOS4)
+    return cv2.resize(
+        frame,
+        (new_width, target_height),
+        interpolation=resize_interpolation(scale),
+    )
 
 
 def compose_frames_horizontal(
