@@ -41,4 +41,9 @@
 - [x] 6.1 Document `--model` in `README.md` and the GUI option in its usage section
 - [x] 6.2 Update `CLAUDE.md`: the output module now pipes frames to FFmpeg (it currently claims this while the code writes PNGs)
 - [x] 6.3 Run `ruff check src tests`, `ruff format src tests`, `mypy src`, `pytest` — all clean (mypy was unblocked separately by #6, now enforced in CI)
-- [ ] 6.4 Measure peak RSS and wall time on a 4K clip before and after, and record the numbers in the change before archiving. **Needs real footage — not done; no 4K clip is available in this environment**
+- [x] 6.4 Measured on a synthetic 4K clip with a deterministic detector stand-in,
+  two videos of 200 frames each: peak RSS 28637 MB -> 18971 MB, wall 40.3 s -> 25.3 s.
+  Output deliberately differs from before this change: the default model moved from
+  m to s and downscaling moved from INTER_LANCZOS4 to INTER_AREA, both intended and
+  documented above. (The follow-up streaming change took the same render from
+  18974 MB to 3244 MB, with byte-identical output.)

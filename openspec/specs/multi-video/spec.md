@@ -52,3 +52,73 @@ The system SHALL ensure all composed videos have the same height in the output.
 - **THEN** all videos SHALL be scaled to the same output height
 - **AND** the aspect ratio (5:3 vertical) SHALL be maintained for each video
 
+### Requirement: Sequential Per-Video Processing
+
+The system SHALL fully process each input video (analysis then cropping) before
+starting the next one, and SHALL release a video's decoded source frames once
+its frames have been cropped.
+
+#### Scenario: Two videos processed in sequence
+
+- **WHEN** the user specifies two `--input` arguments
+- **THEN** the first video SHALL be analyzed and cropped before the second video
+  is analyzed
+- **AND** the decoded source frames of the first video SHALL be released before
+  the second video is analyzed
+
+#### Scenario: Cropped output is unchanged
+
+- **WHEN** the same inputs are processed sequentially rather than in two phases
+- **THEN** the cropped frames SHALL be identical to those produced by the
+  previous two-phase processing
+
+#### Scenario: Source frames released before composition
+
+- **WHEN** all videos have been cropped
+- **THEN** no decoded source frame SHALL be retained while frames are composed
+  and encoded
+
+### Requirement: Streamed Composition
+
+The system SHALL compose multi-video output one frame at a time, drawing each
+video's cropped frames from a stream rather than from a materialized list.
+
+#### Scenario: One composed frame at a time
+
+- **WHEN** several videos are composed
+- **THEN** the system SHALL emit composed frames one at a time
+- **AND** SHALL hold at most one cropped frame per video at any moment
+
+#### Scenario: Slower video repeats its frame
+
+- **WHEN** the time synchronization maps two consecutive output frames to the
+  same source frame of a video
+- **THEN** that video's frame SHALL be reused for both output frames
+- **AND** the video's stream SHALL NOT be advanced between them
+
+#### Scenario: Shorter video freezes on its last frame
+
+- **WHEN** one video's range ends before the output duration
+- **THEN** its last cropped frame SHALL be repeated for the remaining output
+  frames
+
+#### Scenario: Composed output matches the list-based result
+
+- **WHEN** the same inputs are composed by streaming and by the list-based path
+- **THEN** the composed frames SHALL be identical
+
+### Requirement: Non-Decreasing Synchronization Indices
+
+The system SHALL require the frame indices produced by time synchronization to
+be non-decreasing, since streamed composition can only move forward.
+
+#### Scenario: Indices move forward or stay
+
+- **WHEN** synchronization indices are computed for any input
+- **THEN** each index SHALL be greater than or equal to the previous one
+
+#### Scenario: A backwards index is rejected
+
+- **WHEN** a stream is asked for a frame index lower than the one it last served
+- **THEN** the system SHALL raise an error rather than return a wrong frame
+
