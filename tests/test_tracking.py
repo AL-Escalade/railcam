@@ -49,9 +49,9 @@ def test_static_and_climber_form_two_tracks() -> None:
     tracks = build_tracks(scene_static_plus_climber())
 
     assert len(tracks) == 2
-    spans = sorted(track.climb_rise for track in tracks)
-    assert spans[0] == pytest.approx(0.0, abs=0.01)
-    assert spans[1] == pytest.approx(0.8, abs=0.01)
+    rises = sorted(track.climb_rise for track in tracks)
+    assert rises[0] == pytest.approx(0.0, abs=0.01)
+    assert rises[1] == pytest.approx(0.8, abs=0.01)
 
 
 def test_detection_gap_does_not_split_track() -> None:
@@ -249,8 +249,48 @@ def test_left_selector_ignores_short_fragment_track() -> None:
     assert selected.mean_x == pytest.approx(0.40, abs=0.02)
 
 
+def test_short_excerpt_still_prefers_the_climbing_track() -> None:
+    # Salt Lake City 2023 start, shortened: the camera follows the climber, so
+    # her apparent rise is small (0.161 over 64 frames, less on a shorter range).
+    # An absolute threshold applied first drops every track at once, and "right"
+    # then lands on the belayer at the foot of the wall.
+    count = 15
+    frames = frames_of(
+        *[
+            [
+                person(0.35, 0.57 - 0.06 * i / (count - 1)),  # climbing, barely
+                person(0.80, 0.94),  # belayer, static and further right
+            ]
+            for i in range(count)
+        ]
+    )
+    tracks = build_tracks(frames)
+
+    selected = select_track(tracks, ClimberSelector.RIGHT)
+
+    assert selected is not None
+    assert selected.mean_x == pytest.approx(0.35, abs=0.02)
+
+
 def test_fallback_to_all_tracks_when_nothing_climbs() -> None:
     frames = frames_of(*[[person(0.3, 0.5), person(0.7, 0.5)] for _ in range(10)])
+    tracks = build_tracks(frames)
+
+    selected = select_track(tracks, ClimberSelector.LEFT)
+
+    assert selected is not None
+    assert selected.mean_x == pytest.approx(0.3, abs=0.02)
+
+
+def test_jitter_below_the_noise_floor_falls_back_to_position() -> None:
+    # Detection jitter makes every track rise a little; none of it is a climb,
+    # so position must still decide instead of the noisiest track winning.
+    frames = frames_of(
+        *[
+            [person(0.3, 0.50 - 0.01 * (i % 2)), person(0.7, 0.50 - 0.02 * (i % 2))]
+            for i in range(10)
+        ]
+    )
     tracks = build_tracks(frames)
 
     selected = select_track(tracks, ClimberSelector.LEFT)

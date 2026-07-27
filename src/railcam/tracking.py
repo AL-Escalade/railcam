@@ -31,11 +31,13 @@ MAX_JUMP_TOTAL = 0.30
 # other lane's climber and the belayer at the foot of the wall, which the
 # euclidean budget alone lets in once the gap widens.
 MAX_LANE_DRIFT = 0.10
-# Minimum upward displacement for a track to qualify as a climber.
-MIN_CLIMB_SPAN = 0.10
-# A climbing track must also cover at least this fraction of the best track's
-# rise, so detection fragments cannot outrank a full climb.
-MIN_RELATIVE_SPAN = 0.5
+# Noise floor: a rise below this is detection jitter, not motion. It only
+# decides whether anyone climbs at all -- how much a track must rise to be a
+# candidate is set relative to the best track, not by this constant.
+MIN_CLIMB_RISE = 0.03
+# A climbing track must cover at least this fraction of the best track's rise,
+# so detection fragments cannot outrank a full climb.
+MIN_RELATIVE_RISE = 0.5
 # During gap repair, a candidate this close to another track's detection on
 # the same frame is that other person — never attach it.
 OTHER_TRACK_EPSILON = 0.05
@@ -166,19 +168,28 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
 def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None:
     """Choose the climber's track: selectors apply among climbing tracks.
 
-    Tracks below the climbing displacement threshold (static bystanders) are
-    excluded; if none qualifies, all tracks are considered as a fallback.
+    Which tracks climb is decided relative to the one that rises most, with the
+    noise floor as the lower bound. An absolute threshold applied *first* would
+    let the whole distinction collapse on a short excerpt: the camera follows
+    the climber, so her apparent rise stays small -- 0.161 over the 64 frames of
+    the Salt Lake City 2023 start -- and a shorter range drops every track below
+    any fixed bar at once, leaving the selector to pick the rightmost bystander.
+
+    Only when nobody clears the noise floor -- nothing moved -- do all tracks
+    become candidates and position alone decides.
+
+    A camera tilting down lifts every static track together and is not corrected
+    for: the rise measured here is apparent, not ground-truth.
     """
     if not tracks:
         return None
 
-    climbing = [track for track in tracks if track.climb_rise >= MIN_CLIMB_SPAN]
-    if climbing:
-        best_rise = max(track.climb_rise for track in climbing)
-        climbing = [
-            track for track in climbing if track.climb_rise >= MIN_RELATIVE_SPAN * best_rise
-        ]
-    candidates = climbing or tracks
+    best_rise = max(track.climb_rise for track in tracks)
+    if best_rise >= MIN_CLIMB_RISE:
+        cut = max(MIN_RELATIVE_RISE * best_rise, MIN_CLIMB_RISE)
+        candidates = [track for track in tracks if track.climb_rise >= cut]
+    else:
+        candidates = tracks
 
     if selector == ClimberSelector.LEFT:
         return min(candidates, key=lambda track: track.mean_x)
