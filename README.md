@@ -184,9 +184,23 @@ Each input is processed independently, then composed horizontally.
 | `-w, --width PIXELS`                       | Output width            |
 | `-H, --height PIXELS`                      | Output height           |
 | `-s, --speed FACTOR`                       | Playback speed          |
+| `--model {n,s,m,l,x}`                      | Detection model size    |
 | `--debug`                                  | Pose overlay            |
 | `-v, --version`                            | Show version            |
 | `-h, --help`                               | Show help               |
+
+#### Detection model size
+
+`--model` picks the YOLOv8-pose variant, from `n` (fastest) to `x` (most
+accurate). The default is `s`.
+
+Detection dominates render time, so this is the main speed lever: `n` is several
+times faster than `m` on the same footage. Frames where the climber is missed are
+re-run at high resolution regardless of the model, so a lighter model costs less
+accuracy than the raw benchmark numbers suggest. Use `--model m` if the tracking
+wanders on difficult footage.
+
+The GUI exposes the same choice as **Détection** in the render options.
 
 ---
 

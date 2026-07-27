@@ -57,6 +57,8 @@ def build_cli_args(project: Project) -> list[str]:
         args.extend(["-s", str(render.speed)])
     if render.debug:
         args.append("--debug")
+    if render.model != defaults.model:
+        args.extend(["--model", render.model])
     if project.output_path is not None:
         args.extend(["-o", project.output_path.as_posix()])
     return args

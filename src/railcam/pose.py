@@ -27,6 +27,13 @@ CONFIDENCE_THRESHOLD = 0.3
 # crouched climbers on 4K footage that the default resolution misses.
 HIGH_RES_IMGSZ = 1280
 
+# YOLOv8-pose model sizes, from fastest to most accurate.
+MODEL_SIZES = ("n", "s", "m", "l", "x")
+
+# Small is the default: gaps left by a lighter model are recovered by the
+# high-resolution repair pass, which only runs on the frames that need it.
+DEFAULT_MODEL_SIZE = "s"
+
 
 # YOLOv8 pose keypoint indices (COCO format)
 # 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
@@ -117,7 +124,7 @@ class PoseDetector:
     def __init__(
         self,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
-        model_size: str = "m",  # n, s, m, l, x
+        model_size: str = DEFAULT_MODEL_SIZE,
     ) -> None:
         self.confidence_threshold = confidence_threshold
         # Load YOLOv8-pose model from stable cache directory (not current working dir)

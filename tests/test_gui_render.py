@@ -83,3 +83,21 @@ def test_format_command_quotes_paths_with_spaces() -> None:
 
     assert '"my videos/run 1.mp4:0:10"' in command
     assert '"my output.mp4"' in command
+
+
+def test_build_args_omits_model_at_default() -> None:
+    project = Project(
+        videos=[VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10)],
+        render=RenderOptions(model="s"),
+    )
+
+    assert "--model" not in build_cli_args(project)
+
+
+def test_build_args_includes_non_default_model() -> None:
+    project = Project(
+        videos=[VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10)],
+        render=RenderOptions(model="n"),
+    )
+
+    assert build_cli_args(project) == ["-i", "a.mp4:0:10", "--model", "n"]

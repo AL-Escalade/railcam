@@ -21,6 +21,18 @@ MIN_ZOOM_FACTOR = 0.5  # Allow zoom out (larger crop) if video dimensions permit
 MAX_ZOOM_FACTOR = 100.0  # Effectively unlimited
 
 
+def resize_interpolation(scale: float) -> int:
+    """Return the OpenCV interpolation suited to resizing by `scale`.
+
+    INTER_AREA is OpenCV's recommendation for decimation: it averages over the
+    source pixels a destination pixel covers, so it suppresses aliasing that
+    sampling filters leave behind, and it is markedly faster on large frames
+    (4K sources scaled down to roughly 1080p output). Magnification has nothing
+    to average, so it keeps INTER_LINEAR.
+    """
+    return cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+
+
 @dataclass
 class CropRegion:
     """Defines a crop region in pixel coordinates."""
@@ -161,7 +173,11 @@ def scale_frame(
     new_width = new_width - (new_width % 2)
     new_height = new_height - (new_height % 2)
 
-    return cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
+    return cv2.resize(
+        frame,
+        (new_width, new_height),
+        interpolation=resize_interpolation(new_height / height),
+    )
 
 
 def calculate_zoom_factor(

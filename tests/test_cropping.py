@@ -1,5 +1,6 @@
 """Tests for cropping module."""
 
+import cv2
 import numpy as np
 
 from railcam.cropping import (
@@ -12,6 +13,7 @@ from railcam.cropping import (
     calculate_zoom_factor,
     calculate_zoomed_crop_dimensions,
     crop_frame,
+    resize_interpolation,
 )
 from railcam.processing import ProcessedPosition
 
@@ -223,3 +225,16 @@ class TestCalculateAverageTorsoHeight:
     def test_all_zeros_returns_zero(self):
         avg = calculate_average_torso_height([0.0, 0.0, 0.0])
         assert avg == 0.0
+
+
+class TestResizeInterpolation:
+    """Decimation and magnification want different interpolations."""
+
+    def test_shrinking_uses_area(self):
+        assert resize_interpolation(0.5) == cv2.INTER_AREA
+
+    def test_growing_uses_linear(self):
+        assert resize_interpolation(2.0) == cv2.INTER_LINEAR
+
+    def test_identity_uses_linear(self):
+        assert resize_interpolation(1.0) == cv2.INTER_LINEAR

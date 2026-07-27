@@ -25,6 +25,7 @@ from railcam.cropping import (
     CropRegion,
     calculate_average_torso_height,
     calculate_crop_dimensions,
+    resize_interpolation,
     scale_frame,
 )
 from railcam.multi_video import (
@@ -40,7 +41,9 @@ from railcam.output import (
     parse_output_format,
 )
 from railcam.pose import (
+    DEFAULT_MODEL_SIZE,
     HIGH_RES_IMGSZ,
+    MODEL_SIZES,
     ClimberSelector,
     DetectionResult,
     MultiPersonDetectionResult,
@@ -181,6 +184,15 @@ Examples:
         type=float,
         default=1.0,
         help="Playback speed factor (0.5 = half speed/slow-mo, 2.0 = double speed). Default: 1.0",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=DEFAULT_MODEL_SIZE,
+        choices=list(MODEL_SIZES),
+        help="YOLOv8-pose model size, from n (fastest) to x (most accurate). "
+        f"Default: {DEFAULT_MODEL_SIZE}. Larger models detect harder poses but are "
+        "several times slower; missed frames are repaired at high resolution regardless.",
     )
     parser.add_argument(
         "-v",
@@ -489,7 +501,7 @@ def crop_video(
             scaled_frame = cv2.resize(
                 frame,
                 (scaled_width, scaled_height),
-                interpolation=cv2.INTER_LANCZOS4 if scale_factor < 1 else cv2.INTER_LINEAR,
+                interpolation=resize_interpolation(scale_factor),
             )
         else:
             scaled_frame = frame
@@ -574,33 +586,53 @@ def crop_video(
     )
 
 
-def process_single_video(
-    video_input: VideoInput,
+def process_videos(
+    video_inputs: list[VideoInput],
     detector: PoseDetector,
     debug: bool = False,
     target_width: int | None = None,
     target_height: int | None = None,
-) -> VideoProcessingResult:
-    """Process a single video: detect poses, calculate zoom, crop frames.
+) -> list[VideoProcessingResult]:
+    """Analyze and crop each video in turn.
 
-    For single video mode, uses TORSO_HEIGHT_RATIO as target.
+    Each video's decoded source frames are released as soon as its frames are
+    cropped, so only one video's frame cache is ever live. Cropping does not
+    need the other videos' analyses: the zoom target is TORSO_HEIGHT_RATIO for
+    multi-video output, and derived from the single video otherwise.
 
-    Returns:
-        VideoProcessingResult with cropped frames and metadata.
+    The cache is cleared here rather than inside crop_video, which does not own
+    the analysis it is given.
     """
-    analysis = analyze_video(video_input, detector)
+    is_multi_video = len(video_inputs) > 1
+    results: list[VideoProcessingResult] = []
 
-    # For single video, target is TORSO_HEIGHT_RATIO (but can't zoom out)
-    # Use the larger of TORSO_HEIGHT_RATIO and avg_torso (to avoid needing zoom out)
-    target_torso = max(TORSO_HEIGHT_RATIO, analysis.avg_torso_height)
+    for i, video_input in enumerate(video_inputs):
+        if is_multi_video:
+            print(f"\n--- Video {i + 1}/{len(video_inputs)}: {video_input.path.name} ---")
 
-    return crop_video(
-        analysis,
-        target_torso,
-        debug=debug,
-        target_width=target_width,
-        target_height=target_height,
-    )
+        analysis = analyze_video(video_input, detector)
+
+        if is_multi_video:
+            # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
+            if analysis.avg_torso_height > TORSO_HEIGHT_RATIO:
+                torso_pct = analysis.avg_torso_height
+                print(f"  Torso ({torso_pct:.1%}) > target ({TORSO_HEIGHT_RATIO:.1%}) - padding")
+            result = crop_video(analysis, TORSO_HEIGHT_RATIO, debug=debug)
+        else:
+            # Single video: can't zoom out, so never target below the measured torso
+            target_torso = max(TORSO_HEIGHT_RATIO, analysis.avg_torso_height)
+            result = crop_video(
+                analysis,
+                target_torso,
+                debug=debug,
+                target_width=target_width,
+                target_height=target_height,
+            )
+
+        analysis.frames_cache.clear()
+        results.append(result)
+
+    return results
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -623,50 +655,17 @@ def main(argv: list[str] | None = None) -> int:
     is_multi_video = len(video_inputs) > 1
 
     try:
-        # Process all videos
+        # Process all videos, one at a time so only one frame cache is ever live
         print(f"Processing {len(video_inputs)} video(s)...")
-        results: list[VideoProcessingResult] = []
 
-        with PoseDetector() as detector:
-            if is_multi_video:
-                # Multi-video mode: analyze all first, then crop with normalized zoom
-                print("\n=== Phase 1: Analyzing all videos ===")
-                analyses: list[VideoAnalysisResult] = []
-                for video_input in video_inputs:
-                    analysis = analyze_video(video_input, detector)
-                    analyses.append(analysis)
-
-                # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
-                reference_torso = TORSO_HEIGHT_RATIO
-
-                print("\n=== Phase 2: Cropping with normalized zoom ===")
-                print(f"  Target torso ratio: {reference_torso:.1%}")
-
-                # Info about videos needing padding (zoom out with black borders)
-                for i, analysis in enumerate(analyses):
-                    if analysis.avg_torso_height > reference_torso:
-                        torso_pct = analysis.avg_torso_height
-                        print(f"  Video {i + 1}: torso ({torso_pct:.1%}) > target - padding")
-
-                for i, (video_input, analysis) in enumerate(zip(video_inputs, analyses)):
-                    print(f"\nCropping video {i + 1}: {video_input.path.name}")
-                    result = crop_video(
-                        analysis,
-                        reference_torso,
-                        debug=args.debug,
-                    )
-                    results.append(result)
-            else:
-                # Single video mode
-                for video_input in video_inputs:
-                    result = process_single_video(
-                        video_input,
-                        detector,
-                        debug=args.debug,
-                        target_width=args.width,
-                        target_height=args.height,
-                    )
-                    results.append(result)
+        with PoseDetector(model_size=args.model) as detector:
+            results = process_videos(
+                video_inputs,
+                detector,
+                debug=args.debug,
+                target_width=args.width,
+                target_height=args.height,
+            )
 
         # Prepare output frames
         if is_multi_video:

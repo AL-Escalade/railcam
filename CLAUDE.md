@@ -73,7 +73,12 @@ src/railcam/
 4. **Zoom calculation** (`cropping.py`) - Compute scale factor so average torso height = 1/6 of output height
 5. **Cropping** (`cli.py:crop_video`) - Scale-then-crop approach: scale entire frame, crop around pelvis, add padding if needed
 6. **Composition** (`composition.py`) - For multi-video: time-synchronize (freeze last frame), compose horizontally
-7. **Output** (`output.py`) - Pipe frames to FFmpeg for MP4 (H.264) or GIF
+7. **Output** (`output.py`) - Pipe raw BGR frames to FFmpeg stdin for MP4 (H.264) or GIF
+
+Videos are processed one at a time (`cli.py:process_videos`): each is analyzed,
+cropped, then has its decoded source frames released before the next is read.
+Cropping never needs another video's analysis, since the multi-video zoom target
+is the `TORSO_HEIGHT_RATIO` constant.
 
 ### Key Domain Concepts
 

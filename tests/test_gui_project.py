@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from railcam.gui.project import Project, ProjectError, RenderOptions, VideoEntry
+from railcam.gui.project import (
+    MODEL_LABELS,
+    VALID_MODELS,
+    Project,
+    ProjectError,
+    RenderOptions,
+    VideoEntry,
+)
 
 
 def make_project(video_path: Path) -> Project:
@@ -119,3 +126,66 @@ def test_load_rejects_invalid_climber(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectError, match="climber"):
         Project.load(project_file)
+
+
+def test_default_model_is_small() -> None:
+    assert RenderOptions().model == "s"
+
+
+def test_round_trip_preserves_model(tmp_path: Path) -> None:
+    project = Project(
+        videos=[VideoEntry(path=tmp_path / "a.mp4", start_frame=0, end_frame=10)],
+        render=RenderOptions(model="m"),
+    )
+    project_file = tmp_path / "session.railcam.json"
+
+    project.save(project_file)
+
+    assert Project.load(project_file).render.model == "m"
+
+
+def test_project_written_before_model_existed_loads_with_default(tmp_path: Path) -> None:
+    project_file = tmp_path / "session.railcam.json"
+    project_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "videos": [{"path": "a.mp4", "start_frame": 0, "end_frame": 10}],
+                "render": {"format": "mp4", "height": None, "speed": 1.0, "debug": False},
+                "output_path": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert Project.load(project_file).render.model == "s"
+
+
+def test_unknown_model_raises(tmp_path: Path) -> None:
+    project_file = tmp_path / "session.railcam.json"
+    project_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "videos": [{"path": "a.mp4", "start_frame": 0, "end_frame": 10}],
+                "render": {"model": "huge"},
+                "output_path": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProjectError, match="Invalid model size"):
+        Project.load(project_file)
+
+
+def test_every_model_size_has_a_label() -> None:
+    labelled = [value for value, _ in MODEL_LABELS]
+    assert labelled == list(VALID_MODELS)
+
+
+def test_labels_name_the_cli_value() -> None:
+    # The panel shows the equivalent CLI command, so the flag value the user
+    # would copy must be readable from the label they picked.
+    for value, label in MODEL_LABELS:
+        assert f"({value})" in label
