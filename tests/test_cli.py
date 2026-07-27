@@ -7,6 +7,7 @@ import pytest
 from railcam import cli
 from railcam.cli import create_parser
 from railcam.pose import DetectionResult, PelvisPosition, TorsoMeasurement
+from railcam.processing import ProcessedPosition
 
 
 class _RecordingDetector:
@@ -179,3 +180,49 @@ class TestCropPlan:
         assert plan.needs_padding is (
             plan.scaled_width < plan.output_width or plan.scaled_height < plan.output_height
         )
+
+
+def _plan(decoded: int, fps: float) -> cli.CropPlan:
+    """A crop plan with `decoded` positions."""
+    return cli.CropPlan(
+        output_width=40,
+        output_height=60,
+        scaled_width=40,
+        scaled_height=60,
+        scale_factor=1.0,
+        needs_padding=False,
+        positions=[
+            ProcessedPosition(frame_num=i, x=0.5, y=0.5, interpolated=False) for i in range(decoded)
+        ],
+        fps=fps,
+    )
+
+
+def _stream(plan: cli.CropPlan) -> cli.VideoStream:
+    return cli.VideoStream(
+        plan=plan,
+        video_input=cli.VideoInput(path=Path("v.mp4"), start_frame=0, end_frame=10),
+        detections_by_frame={},
+    )
+
+
+class TestOutputDuration:
+    """Durations follow the frames that exist; the plan has no other count."""
+
+    def test_duration_uses_the_decoded_frame_count(self, capsys) -> None:
+        # 60 frames @30fps = 2.00s, 50 @25fps = 2.00s; LCM(30,25) = 150
+        streams = [_stream(_plan(60, 30.0)), _stream(_plan(50, 25.0))]
+
+        output = cli.build_output_stream(streams)
+        capsys.readouterr()
+
+        assert output.total_frames == 300
+
+    def test_shorter_video_freezes_rather_than_shortening_the_output(self, capsys) -> None:
+        # 60 @30fps = 2.00s vs 30 @30fps = 1.00s; the longer one sets the length
+        streams = [_stream(_plan(60, 30.0)), _stream(_plan(30, 30.0))]
+
+        output = cli.build_output_stream(streams)
+        capsys.readouterr()
+
+        assert output.total_frames == 60

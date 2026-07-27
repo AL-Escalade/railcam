@@ -86,9 +86,13 @@ def validate_frame_range(start: int, end: int, total_frames: int) -> None:
             f"End frame ({end}) must be greater than start frame ({start})"
         )
 
-    if end > total_frames:
+    # Frame numbers are 0-indexed, so the last decodable frame is total_frames - 1.
+    # Accepting end == total_frames let the pipeline plan for one more frame than
+    # it could ever decode, which skewed multi-video durations.
+    if end >= total_frames:
         raise InvalidFrameRangeError(
-            f"End frame ({end}) exceeds video length ({total_frames} frames)"
+            f"End frame ({end}) is past the end of the video "
+            f"({total_frames} frames, last frame is {total_frames - 1})"
         )
 
 
