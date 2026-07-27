@@ -6,6 +6,7 @@ import contextlib
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from enum import Enum
 from pathlib import Path
 from typing import IO, Callable
@@ -113,17 +114,21 @@ def _read_stderr(process: subprocess.Popen[bytes], handle: IO[bytes]) -> bytes:
 
 
 def _encode_frames(
-    frames: list[np.ndarray],
+    frames: Iterable[np.ndarray],
     command: list[str],
     stage: str,
+    total_frames: int,
     on_progress: Callable[[int, int, str], None] | None = None,
 ) -> None:
     """Pipe frames into FFmpeg, raising with its error output on failure.
 
+    Frames may be any iterable, so the caller supplies the expected count
+    rather than it being read off a list.
+
     The error stream goes to an anonymous temporary file rather than a pipe:
     a pipe FFmpeg fills while we are still writing frames would deadlock.
     """
-    total_frames = len(frames)
+    written = 0
 
     with tempfile.TemporaryFile() as error_log:
         process = subprocess.Popen(
@@ -136,13 +141,14 @@ def _encode_frames(
         assert stdin is not None
 
         try:
-            for i, frame in enumerate(frames):
+            for frame in frames:
                 if process.poll() is not None:
                     # FFmpeg gave up early; stop rather than block on the pipe
                     break
                 stdin.write(np.ascontiguousarray(frame).tobytes())
+                written += 1
                 if on_progress:
-                    on_progress(i + 1, total_frames, stage)
+                    on_progress(written, total_frames, stage)
         except (BrokenPipeError, OSError):
             # FFmpeg closed the pipe; its error output explains why
             pass
@@ -153,14 +159,68 @@ def _encode_frames(
         stderr = _read_stderr(process, error_log)
 
     if process.returncode != 0:
+        # A dead FFmpeg also truncates the stream; its own error is the useful one
         message = stderr.decode("utf-8", errors="replace").strip()
         raise OutputGenerationError(f"FFmpeg failed ({process.returncode}): {message}")
+
+    if written < total_frames:
+        raise OutputGenerationError(
+            f"Frame stream ended early: encoded {written} of {total_frames} frames"
+        )
 
 
 def _frame_size(frames: list[np.ndarray]) -> tuple[int, int]:
     """Return (width, height) of the frames, taken from the first one."""
     height, width = frames[0].shape[:2]
     return width, height
+
+
+def generate_output_stream(
+    frames: Iterable[np.ndarray],
+    output_path: Path,
+    fps: float,
+    width: int,
+    height: int,
+    total_frames: int,
+    output_format: OutputFormat = OutputFormat.MP4,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> None:
+    """Encode a stream of frames, without materializing them first.
+
+    The caller supplies the frame dimensions and count, which a stream cannot
+    report in advance. This is the path the whole pipeline uses; the list-based
+    helpers below are thin wrappers over it.
+
+    Args:
+        frames: Frames to encode, in output order.
+        output_path: Path to write the output file.
+        fps: Frames per second for the output.
+        width: Width of every frame.
+        height: Height of every frame.
+        total_frames: Expected number of frames, used for progress and to
+            detect a stream that ends early.
+        output_format: Output format (MP4 or GIF).
+        on_progress: Optional progress callback.
+
+    Raises:
+        OutputGenerationError: If there are no frames, if FFmpeg fails, or if
+            the stream yields fewer frames than announced.
+    """
+    if total_frames <= 0:
+        raise OutputGenerationError("No frames to process")
+    check_ffmpeg()
+
+    if output_format == OutputFormat.GIF:
+        command = build_gif_command(output_path, fps, width, height)
+        stage = "Encoding GIF"
+    else:
+        command = build_mp4_command(output_path, fps, width, height)
+        stage = "Encoding MP4"
+
+    _encode_frames(frames, command, stage, total_frames, on_progress)
+
+    if on_progress:
+        on_progress(total_frames, total_frames, "Complete")
 
 
 def generate_gif(
@@ -175,18 +235,11 @@ def generate_gif(
     """
     if not frames:
         raise OutputGenerationError("No frames to process")
-    check_ffmpeg()
 
     width, height = _frame_size(frames)
-    _encode_frames(
-        frames,
-        build_gif_command(output_path, fps, width, height),
-        "Encoding GIF",
-        on_progress,
+    generate_output_stream(
+        frames, output_path, fps, width, height, len(frames), OutputFormat.GIF, on_progress
     )
-
-    if on_progress:
-        on_progress(len(frames), len(frames), "Complete")
 
 
 def generate_mp4(
@@ -201,14 +254,10 @@ def generate_mp4(
     """
     if not frames:
         raise OutputGenerationError("No frames to process")
-    check_ffmpeg()
 
     width, height = _frame_size(frames)
-    _encode_frames(
-        frames,
-        build_mp4_command(output_path, fps, width, height),
-        "Encoding MP4",
-        on_progress,
+    generate_output_stream(
+        frames, output_path, fps, width, height, len(frames), OutputFormat.MP4, on_progress
     )
 
     if on_progress:
