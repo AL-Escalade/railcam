@@ -51,6 +51,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Claude Code per-user settings (.claude/settings.json stays tracked)
+.claude/settings.local.json
+
 # Environment variables
 .env
 .env.local
