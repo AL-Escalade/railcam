@@ -40,5 +40,5 @@
 
 - [x] 6.1 Document `--model` in `README.md` and the GUI option in its usage section
 - [x] 6.2 Update `CLAUDE.md`: the output module now pipes frames to FFmpeg (it currently claims this while the code writes PNGs)
-- [x] 6.3 Run `ruff check src tests`, `ruff format src tests`, `pytest`. `mypy src` fails before reaching this project's code, on the numpy stubs and on `python_version = "3.9"` being below mypy's supported minimum — pre-existing, tracked separately
+- [x] 6.3 Run `ruff check src tests`, `ruff format src tests`, `mypy src`, `pytest` — all clean (mypy was unblocked separately by #6, now enforced in CI)
 - [ ] 6.4 Measure peak RSS and wall time on a 4K clip before and after, and record the numbers in the change before archiving. **Needs real footage — not done; no 4K clip is available in this environment**
