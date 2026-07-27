@@ -60,7 +60,11 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
 "src/railcam/gui/*" = ["N802", "N815"]
 
 [tool.mypy]
-python_version = "3.9"
+# Not the minimum supported runtime (requires-python is >=3.9): mypy 2.x refuses
+# targets below 3.10, and numpy's stubs use PEP 695 `type` statements that only
+# parse when the target is 3.12+, which otherwise aborts the whole run.
+# 3.9 compatibility is covered by ruff's target-version and by the CI test matrix.
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true

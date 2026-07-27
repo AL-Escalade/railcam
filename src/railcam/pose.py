@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 import cv2
 import numpy as np
-from ultralytics import YOLO, settings
+from ultralytics import settings
+from ultralytics.models import YOLO
 
 
 class ClimberSelector(Enum):
@@ -267,6 +268,35 @@ class PoseDetector:
             confidence=float(combined_conf),
         )
 
+    def _person_keypoints(self, frame: np.ndarray, imgsz: int | None = None) -> list[Any]:
+        """Run inference on one frame and return the keypoints of each person.
+
+        ultralytics types a call result as a union of iterators and lists, and a
+        Results as possibly a Tensor. In practice a single frame yields a
+        one-item list of Results. This method is the only place that assumption
+        lives, so the rest of the module works with a plain list.
+
+        Args:
+            frame: The video frame to analyze.
+            imgsz: Optional inference resolution override.
+
+        Returns:
+            One keypoints object per detected person; empty if none.
+        """
+        if imgsz is not None:
+            results = self._model(frame, imgsz=imgsz, verbose=False)
+        else:
+            results = self._model(frame, verbose=False)
+
+        result_list = cast("list[Any]", results)
+        if not result_list:
+            return []
+
+        keypoints = result_list[0].keypoints
+        if keypoints is None:
+            return []
+        return list(keypoints)
+
     def detect_pelvis(self, frame: np.ndarray, frame_num: int) -> DetectionResult:
         """Detect the pelvis position and torso measurement in a frame.
 
@@ -276,23 +306,12 @@ class PoseDetector:
         """
         height, width = frame.shape[:2]
 
-        # Run inference
-        results = self._model(frame, verbose=False)
-
-        if not results or len(results) == 0:
+        persons_keypoints = self._person_keypoints(frame)
+        if not persons_keypoints:
             return DetectionResult(frame_num=frame_num, position=None, torso=None, landmarks=[])
 
-        result = results[0]
-
-        # Check if keypoints were detected
-        if result.keypoints is None or len(result.keypoints) == 0:
-            return DetectionResult(frame_num=frame_num, position=None, torso=None, landmarks=[])
-
-        # Get keypoints for the first (most confident) person
-        keypoints = result.keypoints[0]
-
-        # Extract person detection using shared helper
-        person = self._extract_person_from_keypoints(keypoints, width, height)
+        # Keypoints for the first (most confident) person
+        person = self._extract_person_from_keypoints(persons_keypoints[0], width, height)
 
         if person is None:
             return DetectionResult(frame_num=frame_num, position=None, torso=None, landmarks=[])
@@ -327,25 +346,8 @@ class PoseDetector:
         """
         height, width = frame.shape[:2]
 
-        # Run inference
-        if imgsz is not None:
-            results = self._model(frame, imgsz=imgsz, verbose=False)
-        else:
-            results = self._model(frame, verbose=False)
-
-        if not results or len(results) == 0:
-            return MultiPersonDetectionResult(frame_num=frame_num, persons=[])
-
-        result = results[0]
-
-        # Check if keypoints were detected
-        if result.keypoints is None or len(result.keypoints) == 0:
-            return MultiPersonDetectionResult(frame_num=frame_num, persons=[])
-
         persons: list[PersonDetection] = []
-
-        # Iterate over all detected persons
-        for keypoints in result.keypoints:
+        for keypoints in self._person_keypoints(frame, imgsz):
             person = self._extract_person_from_keypoints(keypoints, width, height)
             if person is not None:
                 persons.append(person)
