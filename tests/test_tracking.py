@@ -442,3 +442,23 @@ def test_jump_budget_falls_back_when_the_track_has_one_detection() -> None:
     single = make_track({0: (0.5, 0.5)})
 
     assert _allowed_jump(1, single) == _allowed_jump(1)
+
+
+def test_selection_ignores_a_short_lived_phantom_track() -> None:
+    """A hold reported as a person drifts upward too, but only for a while.
+
+    Frames 311-435 of a phone-filmed final: the leftmost climbing track was a
+    hold detected on 30 frames of 125, so --climber left framed the wall.
+    """
+    climber = make_track({f: (0.32, 0.80 - 0.005 * f) for f in range(40)})
+    phantom = make_track({f: (0.19, 0.80 - 0.02 * f) for f in range(8)})
+
+    assert select_track([climber, phantom], ClimberSelector.LEFT) is climber
+    assert select_track([climber, phantom], ClimberSelector.AUTO) is climber
+
+
+def test_selection_keeps_a_climber_detected_on_half_the_frames() -> None:
+    sparse = make_track({f: (0.32, 0.80 - 0.005 * f) for f in range(0, 40, 2)})
+    other = make_track({f: (0.68, 0.80 - 0.005 * f) for f in range(40)})
+
+    assert select_track([sparse, other], ClimberSelector.LEFT) is sparse

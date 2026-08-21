@@ -51,6 +51,13 @@ MIN_CLIMB_SPAN = 0.10
 # A climbing track must also cover at least this fraction of the best track's
 # rise, so detection fragments cannot outrank a full climb.
 MIN_RELATIVE_SPAN = 0.5
+# ... and be detected on at least this fraction of the frames the best-covered
+# climbing track holds. Pose models report the occasional hold as a person, and
+# such a detection can drift upward through the frame as the camera pans, which
+# the rise alone cannot tell from a climb. It is never found as consistently as
+# a person, and the leftmost or rightmost candidate would otherwise be that
+# phantom rather than the climber.
+MIN_RELATIVE_COVERAGE = 0.5
 # During gap repair, a candidate this close to another track's detection on
 # the same frame is that other person — never attach it.
 OTHER_TRACK_EPSILON = 0.05
@@ -210,7 +217,9 @@ def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None
     """Choose the climber's track: selectors apply among climbing tracks.
 
     Tracks below the climbing displacement threshold (static bystanders) are
-    excluded; if none qualifies, all tracks are considered as a fallback.
+    excluded, as are those found on far fewer frames than the best candidate --
+    a pose model reporting a hold as a person. If none qualifies, all tracks
+    are considered as a fallback.
     """
     if not tracks:
         return None
@@ -220,6 +229,12 @@ def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None
         best_rise = max(track.climb_rise for track in climbing)
         climbing = [
             track for track in climbing if track.climb_rise >= MIN_RELATIVE_SPAN * best_rise
+        ]
+        best_coverage = max(len(track.detections) for track in climbing)
+        climbing = [
+            track
+            for track in climbing
+            if len(track.detections) >= MIN_RELATIVE_COVERAGE * best_coverage
         ]
     candidates = climbing or tracks
 
