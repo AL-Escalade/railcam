@@ -20,11 +20,16 @@ TORSO_HEIGHT_RATIO = 1 / 6
 MIN_ZOOM_FACTOR = 0.5  # Allow zoom out (larger crop) if video dimensions permit
 MAX_ZOOM_FACTOR = 100.0  # Effectively unlimited
 
-# Free space kept between the climber's keypoints and the crop edges, as a
-# fraction of her measured reach. Keypoints stop at the joints, while the feet,
-# the hands and the hair reach past them, and the smoothed crop centre trails
-# the pelvis by a little.
-BODY_MARGIN_RATIO = 0.2
+# Free space kept beyond the climber's keypoints, in torso heights. Keypoints
+# stop at the joints, and what continues past them scales with the climber, not
+# with how far she happens to be reaching: a pointed foot hangs about a torso
+# below the ankle (1.35 measured on the clip this came from), a hand reaches
+# half a torso past the wrist, and hair a little above the eyes. The three
+# differ enough that one margin for all of them either clips the feet or zooms
+# out on a climber who is merely reaching high.
+FOOT_MARGIN_TORSO_RATIO = 1.4
+HAND_MARGIN_TORSO_RATIO = 0.5
+HEAD_MARGIN_TORSO_RATIO = 0.5
 
 
 def resize_interpolation(scale: float) -> int:
@@ -320,8 +325,10 @@ def calculate_effective_torso_ratio(
 
 
 def max_zoom_keeping_body_in_frame(
-    body_half_width: float,
-    body_half_height: float,
+    reach_left_right: float,
+    reach_up: float,
+    reach_down: float,
+    torso_height: float,
     video_width: int,
     video_height: int,
     output_width: int,
@@ -330,28 +337,32 @@ def max_zoom_keeping_body_in_frame(
     """Largest zoom that still leaves the whole climber inside the crop.
 
     The crop is centered on the pelvis, so what has to fit on each side is the
-    climber's reach from her pelvis, measured over the whole clip and widened
-    by `BODY_MARGIN_RATIO`.
+    climber's reach from her pelvis, measured over the whole clip and extended
+    by what the keypoints stop short of on that side.
 
     Args:
-        body_half_width: Widest reach from the pelvis, as a fraction of the
+        reach_left_right: Widest reach from the pelvis, as a fraction of the
             video width.
-        body_half_height: Longest reach from the pelvis, as a fraction of the
-            video height.
+        reach_up: Highest reach above the pelvis, as a fraction of the video
+            height.
+        reach_down: Lowest reach below the pelvis, as a fraction of the video
+            height.
+        torso_height: Average torso height, as a fraction of the video height.
         video_width: Source width in pixels.
         video_height: Source height in pixels.
         output_width: Crop width in pixels.
         output_height: Crop height in pixels.
 
     Returns:
-        The zoom factor, or MAX_ZOOM_FACTOR when no reach was measured.
+        The zoom factor, or MAX_ZOOM_FACTOR when nothing was measured.
     """
-    margin = 1.0 + BODY_MARGIN_RATIO
-    limits = []
-    if body_half_width > 0:
-        limits.append(output_width / 2 / (body_half_width * video_width * margin))
-    if body_half_height > 0:
-        limits.append(output_height / 2 / (body_half_height * video_height * margin))
+    torso_px = torso_height * video_height
+    sides = (
+        (reach_left_right * video_width + HAND_MARGIN_TORSO_RATIO * torso_px, output_width / 2),
+        (reach_up * video_height + HEAD_MARGIN_TORSO_RATIO * torso_px, output_height / 2),
+        (reach_down * video_height + FOOT_MARGIN_TORSO_RATIO * torso_px, output_height / 2),
+    )
+    limits = [half / needed for needed, half in sides if needed > 0]
     if not limits:
         return MAX_ZOOM_FACTOR
     return min(limits)

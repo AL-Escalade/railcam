@@ -13,11 +13,17 @@ costs nothing extra and needs no second pass.
 
 ## The margin
 
-Keypoints stop at the joints. The foot continues past the ankle, the hand past
-the wrist, the hair past the head, and the smoothed crop centre trails the
-pelvis slightly. `BODY_MARGIN_RATIO` widens the measured reach by a fifth,
-which covers all of it with room to spare — on the diagnosed clip the worst
-frame then left 19% of the half-height free.
+Keypoints stop at the joints, and what continues past them scales with the
+climber rather than with how far she happens to be reaching — so the margin is
+expressed in torso heights, not as a fraction of the reach. Measured on the
+clip this came from, the silhouette hangs about 1.35 torso below the ankle when
+the foot points down; a hand reaches roughly half a torso past the wrist, and
+hair barely clears the eyes.
+
+Those three differ enough that a single margin is wrong either way: sized for
+the foot it zooms out on a climber who is merely reaching high, sized for the
+hair it clips her feet. The reach is therefore measured separately upward,
+downward and sideways, and each gets its own margin.
 
 ## One target for the whole render
 

@@ -23,6 +23,14 @@ put part of her outside the frame.
 - **WHEN** the zoom is chosen
 - **THEN** it SHALL leave free space beyond the measured keypoints, for the
   parts of the body they do not cover
+- **AND** that space SHALL be proportional to the climber's torso height
+
+#### Scenario: Reaching down costs more room than reaching up
+
+- **WHEN** two clips differ only in whether the climber's furthest reach is
+  above or below her pelvis
+- **THEN** the clip reaching down SHALL be zoomed out further, since the foot
+  continues past the ankle where the head barely continues past the eyes
 
 #### Scenario: Cap shared across videos
 

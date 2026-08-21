@@ -549,8 +549,9 @@ class TestFramingLimit:
 
     def _analysis(self, reach: float, torso: float = 0.05):
         analysis = _analysis_for_plan(torso=torso, width=600, height=1000)
-        analysis.body_half_width = reach / 2
-        analysis.body_half_height = reach
+        analysis.reach_left_right = reach / 2
+        analysis.reach_up = reach
+        analysis.reach_down = reach
         return analysis
 
     def test_reach_measured_from_the_landmarks(self) -> None:
@@ -560,7 +561,7 @@ class TestFramingLimit:
             landmarks=[(0.7, 0.9, 0.9), (0.45, 0.2, 0.9)],
         )
 
-        assert cli._body_reach([detection]) == pytest.approx((0.2, 0.4))
+        assert cli._body_reach([detection]) == pytest.approx((0.2, 0.3, 0.4))
 
     def test_unsure_landmarks_are_ignored(self) -> None:
         detection = DetectionResult(
@@ -569,7 +570,7 @@ class TestFramingLimit:
             landmarks=[(0.7, 0.9, 0.9), (0.0, 0.0, 0.01)],
         )
 
-        assert cli._body_reach([detection]) == pytest.approx((0.2, 0.4))
+        assert cli._body_reach([detection]) == pytest.approx((0.2, 0.0, 0.4))
 
     def test_a_close_climber_caps_the_zoom(self) -> None:
         far = cli._target_torso_ratio([self._analysis(reach=0.05)], is_multi_video=False)
@@ -600,5 +601,5 @@ class TestFramingLimit:
             analysis, cli._target_torso_ratio([analysis], is_multi_video=False)
         )
 
-        reach_px = analysis.body_half_height * analysis.video_height * plan.scale_factor
+        reach_px = analysis.reach_down * analysis.video_height * plan.scale_factor
         assert reach_px < plan.output_height / 2

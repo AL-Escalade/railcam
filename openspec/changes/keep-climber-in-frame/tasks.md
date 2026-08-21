@@ -1,11 +1,11 @@
 ## 1. Measure the reach
 
-- [x] 1.1 Add the climber's reach from the pelvis, per axis, to `VideoAnalysisResult`, measured from the landmarks that passed the confidence threshold
+- [x] 1.1 Add the climber's reach from the pelvis — sideways, up and down — to `VideoAnalysisResult`, measured from the landmarks that passed the confidence threshold
 - [x] 1.2 Test: the reach is the largest offset over the clip, and unsure landmarks are ignored
 
 ## 2. Cap the zoom
 
-- [x] 2.1 Add `max_zoom_keeping_body_in_frame` to `cropping.py`, with `BODY_MARGIN_RATIO` covering what the keypoints do not
+- [x] 2.1 Add `max_zoom_keeping_body_in_frame` to `cropping.py`, with a per-direction margin in torso heights covering what the keypoints do not
 - [x] 2.2 Derive the torso ratio that zoom allows, and take the smallest across the render's videos
 - [x] 2.3 Analyze every video before planning any, so the target can be shared
 - [x] 2.4 Report the cap when it applies

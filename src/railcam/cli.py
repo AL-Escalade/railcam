@@ -412,11 +412,14 @@ class VideoAnalysisResult:
     video_width: int
     video_height: int
     frame_count: int
-    # Widest and longest reach from the pelvis over the clip, as fractions of
-    # the video dimensions. The crop is centered on the pelvis, so this is what
-    # has to fit on each side for the climber never to leave the frame.
-    body_half_width: float = 0.0
-    body_half_height: float = 0.0
+    # Reach from the pelvis over the clip, as fractions of the video
+    # dimensions. The crop is centered on the pelvis, so this is what has to
+    # fit on each side for the climber never to leave the frame. Up and down
+    # are kept apart because what continues past the keypoints differs: a foot
+    # hangs far below the ankle, hair barely clears the eyes.
+    reach_left_right: float = 0.0
+    reach_up: float = 0.0
+    reach_down: float = 0.0
 
 
 @dataclass
@@ -507,26 +510,27 @@ def _detect_poses_with_tracking(
     )
 
 
-def _body_reach(detections: Sequence[DetectionResult]) -> tuple[float, float]:
-    """Widest and longest reach from the pelvis over a clip.
+def _body_reach(detections: Sequence[DetectionResult]) -> tuple[float, float, float]:
+    """Reach from the pelvis over a clip, sideways, up and down.
 
     Args:
         detections: Per-frame detections of the selected climber.
 
     Returns:
-        (half width, half height) as fractions of the video dimensions, both 0
-        when nothing was detected confidently enough to measure.
+        (sideways, up, down) as fractions of the video dimensions, all 0 when
+        nothing was detected confidently enough to measure.
     """
-    half_width = half_height = 0.0
+    sideways = up = down = 0.0
     for detection in detections:
         if detection.position is None:
             continue
         for x, y, confidence in detection.landmarks:
             if confidence < CONFIDENCE_THRESHOLD:
                 continue
-            half_width = max(half_width, abs(x - detection.position.x))
-            half_height = max(half_height, abs(y - detection.position.y))
-    return half_width, half_height
+            sideways = max(sideways, abs(x - detection.position.x))
+            up = max(up, detection.position.y - y)
+            down = max(down, y - detection.position.y)
+    return sideways, up, down
 
 
 def analyze_video(
@@ -568,7 +572,7 @@ def analyze_video(
     avg_torso = calculate_average_torso_height(pose_result.torso_heights)
     print(f"  Avg torso height: {avg_torso:.3f} (normalized to source)")
 
-    half_width, half_height = _body_reach(pose_result.detections)
+    sideways, up, down = _body_reach(pose_result.detections)
 
     return VideoAnalysisResult(
         detections=pose_result.detections,
@@ -578,8 +582,9 @@ def analyze_video(
         video_width=metadata.width,
         video_height=metadata.height,
         frame_count=frame_count,
-        body_half_width=half_width,
-        body_half_height=half_height,
+        reach_left_right=sideways,
+        reach_up=up,
+        reach_down=down,
     )
 
 
@@ -882,8 +887,10 @@ def _fitting_torso_ratio(analysis: VideoAnalysisResult) -> float:
         return float("inf")
 
     zoom = max_zoom_keeping_body_in_frame(
-        analysis.body_half_width,
-        analysis.body_half_height,
+        analysis.reach_left_right,
+        analysis.reach_up,
+        analysis.reach_down,
+        analysis.avg_torso_height,
         analysis.video_width,
         analysis.video_height,
         output_width,

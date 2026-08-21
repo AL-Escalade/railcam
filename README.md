@@ -222,7 +222,8 @@ The GUI exposes the same choice as **Détection** in the render options.
 The zoom normalizes the climber's torso to 1/6 of the output height, but never
 so far that she leaves the frame: railcam measures how far she reaches from her
 pelvis over the whole clip and lowers the zoom if that reach — plus a margin for
-the feet and hands the keypoints stop short of — would not fit. When it does
+what the keypoints stop short of, a foot hanging past the ankle or a hand past
+the wrist — would not fit. When it does
 lower it, it says so. In a side-by-side render every video is zoomed to the same
 torso height, the lowest the videos require, so the comparison stays valid.
 

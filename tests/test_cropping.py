@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from railcam.cropping import (
-    BODY_MARGIN_RATIO,
+    FOOT_MARGIN_TORSO_RATIO,
     MAX_ZOOM_FACTOR,
     MIN_ZOOM_FACTOR,
     TORSO_HEIGHT_RATIO,
@@ -246,31 +246,39 @@ class TestResizeInterpolation:
 class TestMaxZoomKeepingBodyInFrame:
     """The crop is centered on the pelvis, so the climber's reach must fit."""
 
-    def _zoom(self, half_width=0.05, half_height=0.1):
-        return max_zoom_keeping_body_in_frame(half_width, half_height, 2160, 3840, 2160, 3600)
+    def _zoom(self, sideways=0.05, up=0.08, down=0.08, torso=0.02):
+        return max_zoom_keeping_body_in_frame(sideways, up, down, torso, 2160, 3840, 2160, 3600)
 
-    def test_no_measured_reach_leaves_the_zoom_alone(self):
-        assert max_zoom_keeping_body_in_frame(0.0, 0.0, 2160, 3840, 2160, 3600) == MAX_ZOOM_FACTOR
-
-    def test_the_longer_the_reach_the_lower_the_zoom(self):
-        assert self._zoom(half_height=0.2) < self._zoom(half_height=0.1)
-
-    def test_the_wider_the_reach_the_lower_the_zoom(self):
-        assert self._zoom(half_width=0.2) < self._zoom(half_width=0.05)
-
-    def test_the_tighter_side_decides(self):
-        wide = max_zoom_keeping_body_in_frame(0.3, 0.01, 2160, 3840, 2160, 3600)
-        tall = max_zoom_keeping_body_in_frame(0.01, 0.3, 2160, 3840, 2160, 3600)
-
-        assert wide == min(wide, tall) or tall == min(wide, tall)
-        assert self._zoom(half_width=0.3, half_height=0.3) == min(
-            self._zoom(half_width=0.3, half_height=0.001),
-            self._zoom(half_width=0.001, half_height=0.3),
+    def test_nothing_measured_leaves_the_zoom_alone(self):
+        """No detection means no torso either, and nothing to keep in frame."""
+        assert (
+            max_zoom_keeping_body_in_frame(0.0, 0.0, 0.0, 0.0, 2160, 3840, 2160, 3600)
+            == MAX_ZOOM_FACTOR
         )
 
-    def test_the_reach_lands_inside_the_crop_with_its_margin(self):
-        half_height = 0.1
-        zoom = self._zoom(half_height=half_height)
+    def test_the_longer_the_reach_the_lower_the_zoom(self):
+        assert self._zoom(down=0.2) < self._zoom(down=0.08)
 
-        reach_px = half_height * 3840 * zoom * (1 + BODY_MARGIN_RATIO)
-        assert reach_px == pytest.approx(3600 / 2)
+    def test_the_wider_the_reach_the_lower_the_zoom(self):
+        assert self._zoom(sideways=0.2) < self._zoom(sideways=0.05)
+
+    def test_a_bigger_climber_needs_a_bigger_margin(self):
+        assert self._zoom(torso=0.05) < self._zoom(torso=0.02)
+
+    def test_reaching_down_costs_more_zoom_than_reaching_up(self):
+        """A foot hangs far below the ankle; hair barely clears the eyes."""
+        assert self._zoom(up=0.2, down=0.05) > self._zoom(up=0.05, down=0.2)
+
+    def test_the_tightest_side_decides(self):
+        assert self._zoom(sideways=0.3, down=0.3) == min(
+            self._zoom(sideways=0.3, down=0.001),
+            self._zoom(sideways=0.001, down=0.3),
+        )
+
+    def test_the_foot_lands_inside_the_crop(self):
+        down, torso = 0.1, 0.02
+        zoom = self._zoom(up=0.0, sideways=0.0, down=down, torso=torso)
+
+        ankle_px = down * 3840 * zoom
+        foot_px = FOOT_MARGIN_TORSO_RATIO * torso * 3840 * zoom
+        assert ankle_px + foot_px == pytest.approx(3600 / 2)
