@@ -46,7 +46,7 @@ MIN_STEP_BUDGET = 0.01
 # other lane's climber and the belayer at the foot of the wall, which the
 # euclidean budget alone lets in once the gap widens.
 MAX_LANE_DRIFT = 0.10
-# Minimum upward displacement for a track to qualify as a climber.
+# Minimum upward displacement, jumps aside, for a track to qualify as a climber.
 MIN_CLIMB_SPAN = 0.10
 # A climbing track must also cover at least this fraction of the best track's
 # rise, so detection fragments cannot outrank a full climb.
@@ -124,6 +124,29 @@ class Track:
             lowest = max(lowest, y)
             rise = max(rise, lowest - y)
         return rise
+
+    @property
+    def _largest_step_up(self) -> float:
+        """Largest upward move between two consecutive detections, 0 if none."""
+        frames = sorted(self.detections)
+        steps = [
+            self.detections[before].pelvis.y - self.detections[after].pelvis.y
+            for before, after in zip(frames, frames[1:])
+        ]
+        return max(max(steps, default=0.0), 0.0)
+
+    @property
+    def steady_rise(self) -> float:
+        """Rise the track achieved without its single largest step.
+
+        A climber gains height gradually, a few thousandths of the frame at a
+        time; a track that hops from one hold to the next owes most of its
+        rise to one jump. Dropping the largest step costs a climber almost
+        nothing and a phantom everything: on the clip this came from, one such
+        track took 74% of its rise from a single step, against 4% and 6% for
+        the two climbers.
+        """
+        return max(self.climb_rise - self._largest_step_up, 0.0)
 
 
 def _allowed_jump(gap_frames: int, track: Track | None = None) -> float:
@@ -228,11 +251,11 @@ def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None
     # of the wall can leave every track below it, and the run still has a
     # climber. The relative cuts then apply either way, so a bystander or a
     # hold never wins by default.
-    candidates = [track for track in tracks if track.climb_rise >= MIN_CLIMB_SPAN] or tracks
+    candidates = [track for track in tracks if track.steady_rise >= MIN_CLIMB_SPAN] or tracks
 
-    best_rise = max(track.climb_rise for track in candidates)
+    best_rise = max(track.steady_rise for track in candidates)
     candidates = [
-        track for track in candidates if track.climb_rise >= MIN_RELATIVE_SPAN * best_rise
+        track for track in candidates if track.steady_rise >= MIN_RELATIVE_SPAN * best_rise
     ]
     best_coverage = max(len(track.detections) for track in candidates)
     candidates = [

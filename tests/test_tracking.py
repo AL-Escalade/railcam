@@ -483,3 +483,39 @@ def test_a_still_bystander_never_wins_by_default() -> None:
     bystander = make_track(dict.fromkeys(range(90), (0.20, 0.90)))
 
     assert select_track([climber, bystander], ClimberSelector.LEFT) is climber
+
+
+def test_a_track_that_teleports_is_not_a_climb() -> None:
+    """A hold picked up here and there owes its rise to one jump.
+
+    Frames 289-382 of a phone-filmed final, detected with the small model: a
+    phantom track took 74% of its rise from a single step and so out-climbed
+    both climbers, who gain a few thousandths of the frame per frame.
+    """
+    positions = dict.fromkeys(range(20), (0.61, 0.6))
+    positions.update(dict.fromkeys(range(40, 60), (0.61, 0.5)))
+    phantom = make_track(positions)
+
+    assert phantom.climb_rise > MIN_CLIMB_SPAN * 0.9
+    assert phantom.steady_rise < phantom.climb_rise / 2
+
+
+def test_a_gradual_climb_keeps_its_rise() -> None:
+    climber = make_track({f: (0.25, 0.80 - 0.005 * f) for f in range(40)})
+
+    assert climber.steady_rise > 0.9 * climber.climb_rise
+
+
+def test_a_track_that_only_descends_has_no_rise() -> None:
+    falling = make_track({f: (0.25, 0.40 + 0.005 * f) for f in range(40)})
+
+    assert falling.steady_rise == 0.0
+
+
+def test_selection_prefers_a_gradual_climb_over_a_teleport() -> None:
+    climber = make_track({f: (0.60, 0.80 - 0.002 * f) for f in range(90)})
+    jumped = dict.fromkeys(range(20), (0.3, 0.6))
+    jumped.update(dict.fromkeys(range(40, 60), (0.3, 0.4)))
+    phantom = make_track(jumped)
+
+    assert select_track([climber, phantom], ClimberSelector.LEFT) is climber
