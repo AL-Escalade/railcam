@@ -189,3 +189,53 @@ def test_labels_name_the_cli_value() -> None:
     # would copy must be readable from the label they picked.
     for value, label in MODEL_LABELS:
         assert f"({value})" in label
+
+
+def test_round_trip_preserves_labels(tmp_path: Path) -> None:
+    project = Project(
+        videos=[
+            VideoEntry(path=tmp_path / "a.mp4", start_frame=0, end_frame=10, label="Dupont"),
+            VideoEntry(path=tmp_path / "b.mp4", start_frame=0, end_frame=10),
+        ],
+        render=RenderOptions(),
+    )
+    project_file = tmp_path / "session.railcam.json"
+
+    project.save(project_file)
+    loaded = Project.load(project_file)
+
+    assert [video.label for video in loaded.videos] == ["Dupont", ""]
+
+
+def test_project_written_before_labels_existed_loads_with_empty_labels(tmp_path: Path) -> None:
+    project_file = tmp_path / "session.railcam.json"
+    project_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "videos": [{"path": "a.mp4", "start_frame": 0, "end_frame": 10}],
+                "render": {},
+                "output_path": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert Project.load(project_file).videos[0].label == ""
+
+
+def test_load_rejects_non_string_label(tmp_path: Path) -> None:
+    project_file = tmp_path / "bad-label.railcam.json"
+    project_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "videos": [{"path": "a.mp4", "start_frame": 0, "end_frame": 10, "label": 42}],
+                "render": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProjectError, match="label"):
+        Project.load(project_file)

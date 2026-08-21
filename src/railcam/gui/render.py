@@ -6,6 +6,7 @@ management lives in the Qt layer.
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -45,8 +46,15 @@ def build_cli_args(project: Project) -> list[str]:
     """Build the railcam CLI argument list, omitting options at their defaults."""
     defaults = RenderOptions()
     args: list[str] = []
+    # Labels are paired with the inputs positionally, so as soon as one video
+    # is labeled every video needs its own --label to keep the pairing right.
+    any_label = any(video.label for video in project.videos)
     for video in project.videos:
         args.extend(["-i", _input_spec(video)])
+        if any_label:
+            # Single token: a label is free text and one starting with a dash
+            # would be read as an option name in the two-token form.
+            args.append(f"--label={video.label}")
 
     render = project.render
     if render.format != defaults.format:
@@ -64,11 +72,10 @@ def build_cli_args(project: Project) -> list[str]:
     return args
 
 
-def _quote(arg: str) -> str:
-    """Quote an argument for display if it contains spaces."""
-    return f'"{arg}"' if " " in arg else arg
-
-
 def format_cli_command(project: Project) -> str:
-    """Return the copyable CLI command equivalent to the project configuration."""
-    return " ".join(["railcam", *(_quote(arg) for arg in build_cli_args(project))])
+    """Return the copyable CLI command equivalent to the project configuration.
+
+    Arguments are shell-quoted, so a command holding free text (a label with an
+    apostrophe, a path with spaces) can be pasted as displayed.
+    """
+    return " ".join(["railcam", *(shlex.quote(arg) for arg in build_cli_args(project))])

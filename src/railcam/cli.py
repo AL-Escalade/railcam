@@ -32,6 +32,7 @@ from railcam.cropping import (
     scale_frame,
 )
 from railcam.frame_source import FrameSource
+from railcam.labeling import LABEL_BAND_RATIO, append_label_band, band_height
 from railcam.multi_video import (
     InputParseError,
     VideoInput,
@@ -105,6 +106,12 @@ Examples:
 
   # Multi-video with climber selection
   railcam --input video.mp4:100:250:left --input video.mp4:100:250:right
+
+  # Labels displayed under each video (paired with the inputs, in order)
+  railcam video.mp4 100 250 --label "Dupont"
+  railcam --input v1.mp4:0:100 --input v2.mp4:0:150 --label "Dupont" --label "Martin"
+  railcam --input v1.mp4:0:100 --input v2.mp4:0:150 --label "Dupont"  # second one unlabeled
+  railcam video.mp4 100 250 --label="-Dupont"  # attached form, for a label starting with -
         """,
     )
 
@@ -139,6 +146,18 @@ Examples:
         help="Video input specification (can be repeated for side-by-side). "
         "Format: path:start_frame:end_frame[:left|right] "
         "(e.g., video.mp4:100:250 or video.mp4:100:250:left)",
+    )
+
+    parser.add_argument(
+        "--label",
+        type=str,
+        action="append",
+        dest="labels",
+        metavar="TEXT",
+        help="Text displayed in a band under a video (can be repeated). "
+        "Labels are paired with the inputs in the order they are given; "
+        "inputs left without a label get an empty band. "
+        "Use --label=TEXT when the text starts with a dash.",
     )
 
     # Climber selection (for positional mode)
@@ -220,6 +239,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
     """
     has_positional = args.video is not None
     has_inputs = args.inputs is not None and len(args.inputs) > 0
+    labels: list[str] = list(args.labels or [])
 
     if has_positional and has_inputs:
         print(
@@ -245,6 +265,14 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
             )
             sys.exit(1)
 
+        if len(labels) > 1:
+            print(
+                f"Error: {len(labels)} --label options given for a single video. "
+                "Use --input to render several videos.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         # Parse climber selector for positional mode
         climber_selector = ClimberSelector.AUTO
         if args.climber is not None:
@@ -258,6 +286,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
                 start_frame=args.start_frame,
                 end_frame=args.end_frame,
                 climber_selector=climber_selector,
+                label=labels[0] if labels else "",
             )
         ]
 
@@ -270,11 +299,24 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
         )
         sys.exit(1)
 
+    if len(labels) > len(args.inputs):
+        print(
+            f"Error: {len(labels)} --label option(s) given for {len(args.inputs)} input(s). "
+            "Labels are paired with the inputs in order.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     try:
-        return [parse_input_spec(spec) for spec in args.inputs]
+        video_inputs = [parse_input_spec(spec) for spec in args.inputs]
     except InputParseError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+    for video_input, label in zip(video_inputs, labels):
+        video_input.label = label
+
+    return video_inputs
 
 
 def print_progress(current: int, total: int, stage: str) -> None:
@@ -441,6 +483,9 @@ class CropPlan:
     There is deliberately no frame count beside `positions`: the two once
     disagreed when a requested range ran past the end of a file, which skewed
     multi-video durations. The positions are the only count.
+
+    `output_height` stays the height of the image alone; the label band is kept
+    beside it so it never has to be recovered from an already rounded total.
     """
 
     output_width: int
@@ -454,6 +499,13 @@ class CropPlan:
     debug: bool = False
     target_width: int | None = None
     target_height: int | None = None
+    label: str = ""
+    label_band_height: int = 0
+
+    @property
+    def frame_height(self) -> int:
+        """Height of an emitted frame before scaling: image plus label band."""
+        return self.output_height + self.label_band_height
 
     @property
     def final_size(self) -> tuple[int, int]:
@@ -463,8 +515,8 @@ class CropPlan:
         it cannot drift from scale_frame's own even-dimension rounding.
         """
         if self.target_width is None and self.target_height is None:
-            return self.output_width, self.output_height
-        probe = np.zeros((self.output_height, self.output_width, 3), dtype=np.uint8)
+            return self.output_width, self.frame_height
+        probe = np.zeros((self.frame_height, self.output_width, 3), dtype=np.uint8)
         scaled = scale_frame(probe, self.target_width, self.target_height)
         return scaled.shape[1], scaled.shape[0]
 
@@ -475,12 +527,26 @@ def build_crop_plan(
     debug: bool = False,
     target_width: int | None = None,
     target_height: int | None = None,
+    label: str = "",
+    label_band_height: int = 0,
 ) -> CropPlan:
     """Compute the crop geometry from an analysis, without reading any frame.
 
     Uses a scale-then-crop approach: scale the whole frame so the torso reaches
     the target size, then crop around the pelvis, padding if the scaled frame
     is smaller than the crop.
+
+    Args:
+        analysis: Analysis of the video to plan.
+        target_torso_ratio: Torso height wanted, as a fraction of the image height.
+        debug: Whether cropped frames get the pose overlay.
+        target_width: Requested output width, or None.
+        target_height: Requested output height, or None.
+        label: Text drawn under the image; empty for no text.
+        label_band_height: Height in pixels of the band under the image, 0 for none.
+
+    Returns:
+        The crop plan for this video.
     """
     output_width, output_height = calculate_crop_dimensions(
         analysis.video_width, analysis.video_height
@@ -511,6 +577,8 @@ def build_crop_plan(
         debug=debug,
         target_width=target_width,
         target_height=target_height,
+        label=label,
+        label_band_height=label_band_height,
     )
 
 
@@ -522,6 +590,11 @@ def print_crop_plan(plan: CropPlan, analysis: VideoAnalysisResult, target_ratio:
     print(f"  Scale factor: {plan.scale_factor:.2f}x (target torso: {target_ratio:.1%})")
     print(f"  Output size: {plan.output_width}x{plan.output_height}")
     print(f"  Scaled frame: {plan.scaled_width}x{plan.scaled_height}")
+    if plan.label_band_height:
+        print(
+            f"  Label band: {plan.label_band_height}px "
+            f"(frame {plan.output_width}x{plan.frame_height})"
+        )
     if plan.needs_padding:
         print("  Padding will be added (scaled frame smaller than output)")
     torso_px = analysis.avg_torso_height * analysis.video_height * plan.scale_factor
@@ -587,6 +660,9 @@ def _crop_one_frame(
             plan.scaled_width,
             plan.scaled_height,
         )
+
+    # Before the output scaling, so the band keeps its proportion at any size
+    cropped = append_label_band(cropped, plan.label, plan.label_band_height)
 
     if plan.target_width is not None or plan.target_height is not None:
         cropped = scale_frame(cropped, plan.target_width, plan.target_height)
@@ -659,11 +735,19 @@ def plan_videos(
     is_multi_video = len(video_inputs) > 1
     streams: list[VideoStream] = []
 
+    # The band belongs to the render, not to a single label: composition
+    # normalizes heights by scaling, so a video left without a band would have
+    # its image scaled by another factor and lose the torso normalization
+    label_ratio = LABEL_BAND_RATIO if any(v.label for v in video_inputs) else 0.0
+
     for i, video_input in enumerate(video_inputs):
         if is_multi_video:
             print(f"\n--- Video {i + 1}/{len(video_inputs)}: {video_input.path.name} ---")
 
         analysis = analyze_video(video_input, detector)
+
+        _, image_height = calculate_crop_dimensions(analysis.video_width, analysis.video_height)
+        video_band_height = band_height(image_height, label_ratio)
 
         if is_multi_video:
             # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
@@ -671,7 +755,13 @@ def plan_videos(
             if analysis.avg_torso_height > TORSO_HEIGHT_RATIO:
                 torso_pct = analysis.avg_torso_height
                 print(f"  Torso ({torso_pct:.1%}) > target ({TORSO_HEIGHT_RATIO:.1%}) - padding")
-            plan = build_crop_plan(analysis, target_torso, debug=debug)
+            plan = build_crop_plan(
+                analysis,
+                target_torso,
+                debug=debug,
+                label=video_input.label,
+                label_band_height=video_band_height,
+            )
         else:
             # Single video: can't zoom out, so never target below the measured torso
             target_torso = max(TORSO_HEIGHT_RATIO, analysis.avg_torso_height)
@@ -681,6 +771,8 @@ def plan_videos(
                 debug=debug,
                 target_width=target_width,
                 target_height=target_height,
+                label=video_input.label,
+                label_band_height=video_band_height,
             )
 
         print_crop_plan(plan, analysis, target_torso)
@@ -766,13 +858,13 @@ def build_output_stream(
     print(f"  Output FPS: {output_fps:.0f} (LCM of {fps_str})")
     print(f"  Target frame count: {target_frame_count}")
 
-    row_height = max(s.plan.output_height for s in streams)
+    row_height = max(s.plan.frame_height for s in streams)
     row_height -= row_height % 2
 
     for i, stream in enumerate(streams):
         freeze = " (freezes)" if durations[i] < max_duration else ""
         print(
-            f"  Video {i + 1}: {stream.plan.output_width}x{stream.plan.output_height}, "
+            f"  Video {i + 1}: {stream.plan.output_width}x{stream.plan.frame_height}, "
             f"{durations[i]:.2f}s @ {fps_list[i]:.1f}fps{freeze}"
         )
 
@@ -782,9 +874,7 @@ def build_output_stream(
             row = scale_frame(row, target_width, target_height)
         return row
 
-    width, height = _measure(
-        compose, [(s.plan.output_width, s.plan.output_height) for s in streams]
-    )
+    width, height = _measure(compose, [(s.plan.output_width, s.plan.frame_height) for s in streams])
 
     def rows() -> Iterator[np.ndarray]:
         cursors = [FrameCursor(s.frames()) for s in streams]

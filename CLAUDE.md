@@ -60,6 +60,7 @@ src/railcam/
 ├── pose.py         # YOLOv8-pose detection, climber selection, torso measurement
 ├── processing.py   # Position interpolation and exponential smoothing
 ├── cropping.py     # Crop region calculation, zoom normalization
+├── labeling.py     # Optional text label band appended under a cropped frame
 ├── composition.py  # Multi-video time sync and horizontal composition
 ├── multi_video.py  # Input spec parsing (path:start:end:climber)
 └── output.py       # MP4/GIF generation via FFmpeg subprocess
@@ -82,7 +83,7 @@ dependency, not a choice.
 
 **Pass 2 — render**, driven lazily by the encoder pulling frames:
 
-6. **Cropping** (`cli.py:crop_frames`) - Re-decode the range and yield cropped frames one at a time: scale the frame, crop around the pelvis, pad if needed. Each decoded frame's number is checked against its planned position, since a silent desync would mis-frame everything
+6. **Cropping** (`cli.py:crop_frames`) - Re-decode the range and yield cropped frames one at a time: scale the frame, crop around the pelvis, pad if needed. Each decoded frame's number is checked against its planned position, since a silent desync would mis-frame everything. The optional label band (`labeling.py`) is appended under the image after the debug overlay and before the output scaling, so it stays a fixed fraction of the image at any output size
 7. **Composition** (`composition.py`) - For multi-video: a `FrameCursor` per video pulls its crop stream forward along the time-sync indices (which never decrease), and `compose_frame_row` emits one composed frame at a time
 8. **Output** (`output.py:generate_output_stream`) - Pipe raw BGR frames to FFmpeg stdin for MP4 (H.264) or GIF
 

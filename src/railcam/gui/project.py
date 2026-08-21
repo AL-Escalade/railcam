@@ -39,12 +39,13 @@ class ProjectError(Exception):
 
 @dataclass
 class VideoEntry:
-    """One video in a session: source file, frame range, and climber choice."""
+    """One video in a session: source file, frame range, climber choice and label."""
 
     path: Path
     start_frame: int
     end_frame: int
     climber: str = "auto"
+    label: str = ""
 
 
 @dataclass
@@ -77,6 +78,7 @@ class Project:
                     "start_frame": video.start_frame,
                     "end_frame": video.end_frame,
                     "climber": video.climber,
+                    "label": video.label,
                 }
                 for video in self.videos
             ],
@@ -152,10 +154,21 @@ def _load_video_entry(entry: Any, project_dir: Path) -> VideoEntry:
             f"Invalid climber selector: {climber!r}. Valid values are {VALID_CLIMBERS}."
         )
 
+    # Absent in project files written before labels existed
+    label = entry.get("label", "")
+    if not isinstance(label, str):
+        raise ProjectError(f"Invalid label: {label!r}. Expected a string.")
+
     path = Path(raw_path)
     if not path.is_absolute():
         path = project_dir / path
-    return VideoEntry(path=path, start_frame=start_frame, end_frame=end_frame, climber=climber)
+    return VideoEntry(
+        path=path,
+        start_frame=start_frame,
+        end_frame=end_frame,
+        climber=climber,
+        label=label,
+    )
 
 
 def _load_render_options(data: dict[str, Any]) -> RenderOptions:

@@ -2,10 +2,12 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from railcam import cli
 from railcam.cli import create_parser
+from railcam.labeling import LABEL_BAND_RATIO, band_height
 from railcam.pose import DetectionResult, PelvisPosition, TorsoMeasurement
 from railcam.processing import ProcessedPosition
 
@@ -182,7 +184,7 @@ class TestCropPlan:
         )
 
 
-def _plan(decoded: int, fps: float) -> cli.CropPlan:
+def _plan(decoded: int, fps: float, label: str = "", label_band_height: int = 0) -> cli.CropPlan:
     """A crop plan with `decoded` positions."""
     return cli.CropPlan(
         output_width=40,
@@ -195,6 +197,8 @@ def _plan(decoded: int, fps: float) -> cli.CropPlan:
             ProcessedPosition(frame_num=i, x=0.5, y=0.5, interpolated=False) for i in range(decoded)
         ],
         fps=fps,
+        label=label,
+        label_band_height=label_band_height,
     )
 
 
@@ -226,3 +230,153 @@ class TestOutputDuration:
         capsys.readouterr()
 
         assert output.total_frames == 60
+
+
+def _validated(argv: list[str]) -> list[cli.VideoInput]:
+    """Parse an argument list the way main does, up to the VideoInput list."""
+    return cli.validate_args(create_parser().parse_args(argv))
+
+
+class TestLabelOption:
+    """Labels are paired with the inputs in the order they are given."""
+
+    def test_label_reaches_the_single_video(self) -> None:
+        inputs = _validated(["video.mp4", "0", "10", "--label", "Dupont"])
+
+        assert [vi.label for vi in inputs] == ["Dupont"]
+
+    def test_labels_pair_with_inputs_in_order(self) -> None:
+        inputs = _validated(
+            ["-i", "a.mp4:0:10", "-i", "b.mp4:0:10", "--label", "Dupont", "--label", "Martin"]
+        )
+
+        assert [(vi.path.stem, vi.label) for vi in inputs] == [("a", "Dupont"), ("b", "Martin")]
+
+    def test_missing_labels_are_empty(self) -> None:
+        inputs = _validated(["-i", "a.mp4:0:10", "-i", "b.mp4:0:10", "--label", "Dupont"])
+
+        assert [vi.label for vi in inputs] == ["Dupont", ""]
+
+    def test_no_label_leaves_every_input_empty(self) -> None:
+        inputs = _validated(["-i", "a.mp4:0:10", "-i", "b.mp4:0:10"])
+
+        assert [vi.label for vi in inputs] == ["", ""]
+
+    def test_more_labels_than_inputs_exits_non_zero(self, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _validated(["-i", "a.mp4:0:10", "--label", "Dupont", "--label", "Martin"])
+
+        assert exc.value.code != 0
+        assert "2" in capsys.readouterr().err
+
+    def test_several_labels_in_positional_mode_exits_non_zero(self, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _validated(["video.mp4", "0", "10", "--label", "Dupont", "--label", "Martin"])
+
+        assert exc.value.code != 0
+        assert capsys.readouterr().err != ""
+
+    def test_label_starting_with_a_dash_uses_the_attached_form(self) -> None:
+        inputs = _validated(["-i", "a.mp4:0:10", "--label=-Dupont"])
+
+        assert inputs[0].label == "-Dupont"
+
+    def test_label_may_contain_colons_and_spaces(self) -> None:
+        inputs = _validated(["-i", "a.mp4:0:10", "--label", "Run 2: final"])
+
+        assert inputs[0].label == "Run 2: final"
+
+
+class TestLabelBandPlanning:
+    """The band is a property of the render, shared by every video."""
+
+    def _plan_videos(self, monkeypatch, capsys, video_inputs) -> list[cli.VideoStream]:
+        monkeypatch.setattr(cli, "analyze_video", lambda vi, detector: _analysis_for_plan())
+        streams = cli.plan_videos(video_inputs, detector=object())
+        capsys.readouterr()
+        return streams
+
+    def test_unlabeled_render_has_no_band(self, monkeypatch, capsys) -> None:
+        streams = self._plan_videos(
+            monkeypatch, capsys, [cli.VideoInput(path=Path("a.mp4"), start_frame=0, end_frame=10)]
+        )
+
+        plan = streams[0].plan
+        assert plan.label_band_height == 0
+        assert plan.frame_height == plan.output_height
+        assert plan.final_size == (plan.output_width, plan.output_height)
+
+    def test_one_label_gives_every_video_the_same_band_ratio(self, monkeypatch, capsys) -> None:
+        streams = self._plan_videos(
+            monkeypatch,
+            capsys,
+            [
+                cli.VideoInput(path=Path("a.mp4"), start_frame=0, end_frame=10, label="Dupont"),
+                cli.VideoInput(path=Path("b.mp4"), start_frame=0, end_frame=10),
+            ],
+        )
+
+        ratios = [s.plan.label_band_height / s.plan.output_height for s in streams]
+        assert all(h > 0 for h in (s.plan.label_band_height for s in streams))
+        assert ratios[0] == pytest.approx(ratios[1])
+        assert [s.plan.label for s in streams] == ["Dupont", ""]
+
+    def test_band_matches_the_module_ratio(self, monkeypatch, capsys) -> None:
+        streams = self._plan_videos(
+            monkeypatch,
+            capsys,
+            [cli.VideoInput(path=Path("a.mp4"), start_frame=0, end_frame=10, label="Dupont")],
+        )
+
+        plan = streams[0].plan
+        assert plan.label_band_height == band_height(plan.output_height, LABEL_BAND_RATIO)
+
+
+class TestLabelBandRendering:
+    """The band is appended to the image, and every size measurement sees it."""
+
+    def _frame(self, plan: cli.CropPlan) -> np.ndarray:
+        source = np.full((plan.scaled_height, plan.scaled_width, 3), 200, dtype=np.uint8)
+        return cli._crop_one_frame(plan, source, plan.positions[0], None)
+
+    def test_cropped_frame_is_taller_by_the_band_height(self) -> None:
+        plain = self._frame(_plan(1, 30.0))
+        labeled = self._frame(_plan(1, 30.0, label="Dupont", label_band_height=6))
+
+        assert labeled.shape[0] == plain.shape[0] + 6
+        assert labeled.shape[1] == plain.shape[1]
+
+    def test_image_above_the_band_is_untouched(self) -> None:
+        plan = _plan(1, 30.0, label="Dupont", label_band_height=6)
+
+        labeled = self._frame(plan)
+
+        assert np.array_equal(labeled[: plan.output_height], self._frame(_plan(1, 30.0)))
+
+    def test_band_is_drawn_before_the_output_scaling(self) -> None:
+        """The band keeps its proportion of the output height at any size."""
+        plan = _plan(1, 30.0, label="Dupont", label_band_height=6)
+        plan.target_height = plan.frame_height * 2
+
+        scaled = self._frame(plan)
+
+        assert scaled.shape[0] == plan.frame_height * 2
+
+    def test_single_video_output_size_includes_the_band(self, capsys) -> None:
+        plan = _plan(3, 30.0, label="Dupont", label_band_height=6)
+
+        output = cli.build_output_stream([_stream(plan)])
+        capsys.readouterr()
+
+        assert output.height == plan.frame_height
+
+    def test_composition_row_height_follows_the_frame_height(self, capsys) -> None:
+        plans = [
+            _plan(3, 30.0, label="Dupont", label_band_height=6),
+            _plan(3, 30.0, label_band_height=6),
+        ]
+
+        output = cli.build_output_stream([_stream(p) for p in plans])
+        capsys.readouterr()
+
+        assert output.height == max(p.frame_height for p in plans)

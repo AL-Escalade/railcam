@@ -45,6 +45,10 @@ Just reproducible, normalized clips ready for **performance analysis, coaching, 
 * **Side-by-side composition**
   Compare multiple climbers or runs in a single synchronized output.
 
+* **Per-video label**
+  Optional name displayed in a band under each video, so a comparison says who
+  is who.
+
 * **MP4 & GIF output**
   High-quality H.264 MP4 or lightweight GIF.
 
@@ -110,6 +114,11 @@ railcam video.mp4 100 250 --climber left
 railcam \
   --input video.mp4:100:250:left \
   --input video.mp4:100:250:right
+
+# Named side-by-side comparison
+railcam \
+  --input run1.mp4:100:250 --label "Dupont" \
+  --input run2.mp4:80:230  --label "Martin"
 ```
 
 ---
@@ -134,6 +143,8 @@ The GUI lets you:
 - Set each video's start/end frame from the displayed image — start frames
   are the synchronization points (t=0), exactly like the CLI
 - Choose the climber (auto/left/right) per video
+- Give each video a **Légende** — the text displayed under its image in the
+  rendered file (leave it empty to render without a band)
 - Play all videos synchronized in slow motion (space bar to play/pause)
   to check the timing before rendering
 - Configure render options, see the equivalent CLI command live (copyable),
@@ -179,6 +190,7 @@ Each input is processed independently, then composed horizontally.
 | ------------------------------------------ | ----------------------- |
 | `-i, --input PATH:START:END[:left\|right]` | Input spec (repeatable) |
 | `-c, --climber {left,right}`               | Select climber          |
+| `--label TEXT`                             | Label under a video (repeatable) |
 | `-o, --output PATH`                        | Output path             |
 | `-f, --format {mp4,gif}`                   | Output format           |
 | `-w, --width PIXELS`                       | Output width            |
@@ -201,6 +213,34 @@ accuracy than the raw benchmark numbers suggest. Use `--model m` if the tracking
 wanders on difficult footage.
 
 The GUI exposes the same choice as **Détection** in the render options.
+
+#### Video labels
+
+`--label` writes a text under a video, centered in a solid black band appended
+below the image. Labels default to empty: without `--label`, the output is
+exactly what it was before.
+
+`--label` is repeatable and paired with the inputs **in the order they are
+given**:
+
+```bash
+railcam \
+  --input run1.mp4:100:250 --label "Dupont" \
+  --input run2.mp4:80:230  --label "Martin"
+```
+
+Inputs left without a label get an empty band. Giving more labels than inputs,
+or more than one label in single-video mode, is an error.
+
+Labels are drawn as typed, accents included, with the DejaVu Sans font bundled
+with railcam (so a label looks the same on every machine). A label starting with
+a dash must use the attached form, `--label="-Dupont"`, otherwise it is read as
+an option name.
+
+Note: the band is added *under* the 5:3 crop, so a labeled output is slightly
+taller than 5:3. The image itself keeps its 5:3 ratio and its zoom
+normalization — in multi-video mode every video gets a band of the same
+relative height as soon as one of them is labeled.
 
 ---
 

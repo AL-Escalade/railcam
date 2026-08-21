@@ -43,6 +43,21 @@ class TestVideoInput:
         )
         assert vi.climber_selector == ClimberSelector.RIGHT
 
+    def test_default_label_is_empty(self):
+        vi = VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=250)
+        assert vi.label == ""
+
+    def test_label_is_free_text(self):
+        vi = VideoInput(
+            path=Path("video.mp4"), start_frame=100, end_frame=250, label="Run 2: final"
+        )
+        assert vi.label == "Run 2: final"
+
+    def test_spec_parsing_ignores_labels(self):
+        """Labels come from a separate option, so the grammar is unchanged."""
+        vi = parse_input_spec("video.mp4:100:250:left")
+        assert vi.label == ""
+
     def test_negative_start_frame_raises(self):
         with pytest.raises(InputParseError, match="Start frame must be >= 0"):
             VideoInput(path=Path("video.mp4"), start_frame=-1, end_frame=100)

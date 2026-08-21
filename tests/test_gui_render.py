@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
+import pytest
+
+from railcam.cli import create_parser, validate_args
 from railcam.gui.project import Project, RenderOptions, VideoEntry
 from railcam.gui.render import build_cli_args, format_cli_command
 
@@ -81,8 +85,9 @@ def test_format_command_quotes_paths_with_spaces() -> None:
 
     command = format_cli_command(project)
 
-    assert '"my videos/run 1.mp4:0:10"' in command
-    assert '"my output.mp4"' in command
+    assert "'my videos/run 1.mp4:0:10'" in command
+    assert "'my output.mp4'" in command
+    assert shlex.split(command) == ["railcam", *build_cli_args(project)]
 
 
 def test_build_args_omits_model_at_default() -> None:
@@ -101,3 +106,78 @@ def test_build_args_includes_non_default_model() -> None:
     )
 
     assert build_cli_args(project) == ["-i", "a.mp4:0:10", "--model", "n"]
+
+
+def test_build_args_omits_label_when_no_video_is_labeled() -> None:
+    project = Project(
+        videos=[
+            VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10),
+            VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10),
+        ],
+        render=RenderOptions(),
+    )
+
+    assert "--label" not in build_cli_args(project)
+
+
+def test_build_args_emits_one_label_per_video_when_any_is_labeled() -> None:
+    project = Project(
+        videos=[
+            VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10, label="Dupont"),
+            VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10),
+        ],
+        render=RenderOptions(),
+    )
+
+    args = build_cli_args(project)
+
+    assert args == [
+        "-i",
+        "a.mp4:0:10",
+        "--label=Dupont",
+        "-i",
+        "b.mp4:0:10",
+        "--label=",
+    ]
+
+
+def test_format_command_keeps_an_empty_label() -> None:
+    project = Project(
+        videos=[
+            VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10, label="Jean Dupont"),
+            VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10),
+        ],
+        render=RenderOptions(),
+    )
+
+    command = format_cli_command(project)
+
+    assert command == "railcam -i a.mp4:0:10 '--label=Jean Dupont' -i b.mp4:0:10 --label="
+    assert shlex.split(command) == ["railcam", *build_cli_args(project)]
+
+
+def _labeled_project(label: str) -> Project:
+    return Project(
+        videos=[VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10, label=label)],
+        render=RenderOptions(),
+    )
+
+
+@pytest.mark.parametrize(
+    "label", ["-Dupont", "O'Brien", 'Jean "Jojo" Dupont', "Run 2: final", "a;rm -rf x"]
+)
+def test_displayed_command_survives_a_shell_round_trip(label: str) -> None:
+    project = _labeled_project(label)
+
+    command = format_cli_command(project)
+
+    assert shlex.split(command) == ["railcam", *build_cli_args(project)]
+
+
+@pytest.mark.parametrize("label", ["-Dupont", "--climber", "O'Brien", "Jean Dupont"])
+def test_built_args_are_parsed_back_as_labels_by_the_cli(label: str) -> None:
+    args = build_cli_args(_labeled_project(label))
+
+    inputs = validate_args(create_parser().parse_args(args))
+
+    assert [video.label for video in inputs] == [label]

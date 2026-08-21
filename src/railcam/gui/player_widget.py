@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSizePolicy,
     QToolButton,
@@ -141,7 +142,7 @@ class FrameDisplay(QLabel):
 
 
 class PlayerWidget(QFrame):
-    """One video of the session: navigation, range selection and climber choice."""
+    """One video of the session: navigation, range selection, climber choice and label."""
 
     stateChanged = Signal()
     removeRequested = Signal()
@@ -223,6 +224,12 @@ class PlayerWidget(QFrame):
         range_row.addWidget(self.end_button)
         range_row.addWidget(self.range_label)
         range_row.addStretch()
+        range_row.addWidget(QLabel("Légende :"))
+        self.label_edit = QLineEdit()
+        self.label_edit.setPlaceholderText("Nom affiché sous la vidéo")
+        self.label_edit.setToolTip("Texte affiché sous l'image dans la vidéo rendue")
+        self.label_edit.textChanged.connect(lambda _: self.stateChanged.emit())
+        range_row.addWidget(self.label_edit)
         range_row.addWidget(QLabel("Grimpeur :"))
         self.climber_combo = QComboBox()
         for value, label in CLIMBER_LABELS:
@@ -239,21 +246,27 @@ class PlayerWidget(QFrame):
     def climber(self) -> str:
         return str(self.climber_combo.currentData())
 
+    @property
+    def label(self) -> str:
+        return self.label_edit.text()
+
     def to_video_entry(self) -> VideoEntry:
         return VideoEntry(
             path=self.source.path,
             start_frame=self.start_frame,
             end_frame=self.end_frame,
             climber=self.climber,
+            label=self.label,
         )
 
     def apply_entry(self, entry: VideoEntry) -> None:
-        """Restore range and climber from a project entry."""
+        """Restore range, climber and label from a project entry."""
         self.start_frame = entry.start_frame
         self.end_frame = entry.end_frame
         index = self.climber_combo.findData(entry.climber)
         if index >= 0:
             self.climber_combo.setCurrentIndex(index)
+        self.label_edit.setText(entry.label)
         self.timeline.set_range(self.start_frame, self.end_frame)
         self.display_frame(self.start_frame)
         self._refresh_labels()
