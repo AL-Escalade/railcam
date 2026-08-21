@@ -11,6 +11,7 @@ from railcam.pose import (
     PersonDetection,
 )
 from railcam.tracking import (
+    _allowed_jump,
     build_tracks,
     repair_track_gaps,
     select_track,
@@ -411,3 +412,33 @@ def test_repair_fills_interior_gap() -> None:
 
     assert repaired == 2
     assert 4 in track.detections and 5 in track.detections
+
+
+def test_repair_rejects_a_false_positive_far_below_the_climber() -> None:
+    """A hold detected as a person sat within the old fixed jump budget.
+
+    Frames 243-249 of a 60 fps 4K final: the climber rises ~0.004 per frame,
+    and a hold 0.3 of a frame below her is reported as a person on every
+    frame. The gap-scaled budget reached 0.30, so the repair attached it and
+    the crop dived and came back.
+    """
+    track = make_track({f: (0.64, 0.39 - 0.004 * (f - 235)) for f in range(235, 244)})
+    phantom = [person(0.675, 0.674)]
+
+    repaired = repair_track_gaps(track, list(range(235, 249)), lambda f: phantom)
+
+    assert repaired == 0
+    assert all(d.pelvis.y < 0.5 for d in track.detections.values())
+
+
+def test_jump_budget_follows_the_track_own_motion() -> None:
+    slow = make_track({f: (0.5, 0.5 - 0.002 * f) for f in range(10)})
+    fast = make_track({f: (0.5, 0.5 - 0.02 * f) for f in range(10)})
+
+    assert _allowed_jump(1, slow) < _allowed_jump(1, fast)
+
+
+def test_jump_budget_falls_back_when_the_track_has_one_detection() -> None:
+    single = make_track({0: (0.5, 0.5)})
+
+    assert _allowed_jump(1, single) == _allowed_jump(1)

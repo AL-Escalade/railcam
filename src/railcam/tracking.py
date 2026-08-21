@@ -19,11 +19,26 @@ from railcam.pose import (
     PersonDetection,
 )
 
-# Maximum plausible movement between two consecutive frames (normalized).
+# Maximum plausible movement between two consecutive frames (normalized), used
+# while a track is too short to have measured its own motion.
 MAX_JUMP_PER_FRAME = 0.15
 # Cap on gap-scaled jumps: stays below the typical distance between lanes,
 # so a track never teleports onto the other climber after a detection gap.
 MAX_JUMP_TOTAL = 0.30
+# How much faster than its own observed motion a track may plausibly move. It
+# is deliberately loose: the repair pass infers at a higher resolution than the
+# main one and lands the pelvis a little differently, and that offset must not
+# read as a jump. Even so it rejects a candidate a third of a frame away, which
+# is what a false positive on a hold looks like.
+# The frame rate and how much wall the shot covers are both unknown here, and
+# together they span two orders of magnitude, so a fixed budget is either too
+# tight for a wide 30 fps shot or -- as it was -- wide enough to swallow a
+# third of the frame between two 60 fps frames. A track's own steps carry both
+# unknowns already.
+STEP_TOLERANCE = 5.0
+# Floor on that budget, so a track that has barely moved yet (crouched start,
+# a climber setting up) stays repairable.
+MIN_STEP_BUDGET = 0.01
 # Maximum horizontal deviation from the previous position, both when
 # associating detections and when repairing a gap. A climber stays in a
 # near-fixed vertical lane, so x barely changes even across large (vertical)
@@ -65,6 +80,23 @@ class Track:
         return sum(p.pelvis.x for p in self.detections.values()) / len(self.detections)
 
     @property
+    def typical_step(self) -> float | None:
+        """Median per-frame movement of this track, or None if never measured.
+
+        The median ignores the occasional wild detection, which is the point:
+        this is the scale a plausible jump is judged against.
+        """
+        frames = sorted(self.detections)
+        steps = []
+        for previous, current in zip(frames, frames[1:]):
+            before = self.detections[previous].pelvis
+            after = self.detections[current].pelvis
+            steps.append(math.hypot(after.x - before.x, after.y - before.y) / (current - previous))
+        if not steps:
+            return None
+        return sorted(steps)[len(steps) // 2]
+
+    @property
     def climb_rise(self) -> float:
         """Largest rise from an earlier frame to a later one.
 
@@ -87,9 +119,20 @@ class Track:
         return rise
 
 
-def _allowed_jump(gap_frames: int) -> float:
-    """Maximum association distance after gap_frames without detection."""
-    return min(MAX_JUMP_PER_FRAME * max(gap_frames, 1), MAX_JUMP_TOTAL)
+def _allowed_jump(gap_frames: int, track: Track | None = None) -> float:
+    """Maximum association distance after gap_frames without detection.
+
+    Args:
+        gap_frames: Frames since the track was last seen.
+        track: The track being extended; its own motion sets the scale once it
+            has been seen at least twice.
+
+    Returns:
+        The largest plausible distance, normalized to the frame.
+    """
+    step = track.typical_step if track is not None else None
+    per_frame = MAX_JUMP_PER_FRAME if step is None else max(step * STEP_TOLERANCE, MIN_STEP_BUDGET)
+    return min(per_frame * max(gap_frames, 1), MAX_JUMP_TOTAL)
 
 
 def _dedupe_persons(persons: list[PersonDetection]) -> list[PersonDetection]:
@@ -149,7 +192,7 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
             # gap-scaled budget has grown.
             if abs(track.last_position.x - person.pelvis.x) > MAX_LANE_DRIFT:
                 continue
-            if distance > _allowed_jump(result.frame_num - track.last_frame):
+            if distance > _allowed_jump(result.frame_num - track.last_frame, track):
                 continue
             track.add(result.frame_num, person)
             matched_tracks.add(track_index)
@@ -219,7 +262,7 @@ def repair_track_gaps(
     for frame_num in sorted(missing, key=lambda f: min(abs(f - k) for k in known)):
         anchor_frame = min(track.detections, key=lambda k: abs(k - frame_num))
         anchor = track.detections[anchor_frame].pelvis
-        allowed = _allowed_jump(abs(frame_num - anchor_frame))
+        allowed = _allowed_jump(abs(frame_num - anchor_frame), track)
 
         best: PersonDetection | None = None
         best_distance = allowed
