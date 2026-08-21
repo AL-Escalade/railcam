@@ -79,7 +79,7 @@ dependency, not a choice.
 2. **Pose detection** (`pose.py`) - YOLOv8-pose detects all persons per frame, at a resolution that follows the source (half its largest side, clamped to [640, 1920]) unless `--imgsz` overrides it
 3. **Track selection** (`tracking.py`) - Group detections into motion tracks, pick the climber by upward movement
 4. **Gap repair** (`frame_source.py`) - Re-read only the frames the selected track is missing, by index, and retry at twice the detection resolution
-5. **Crop planning** (`cli.py:build_crop_plan`) - Interpolate and smooth positions, compute scale factor and output size. Pure: no pixels involved
+5. **Crop planning** (`cli.py:build_crop_plan`) - Interpolate and smooth positions, compute scale factor and output size. Pure: no pixels involved. The zoom is capped so the climber's measured reach always fits the crop, and every video of a render shares the lowest cap
 
 **Pass 2 — render**, driven lazily by the encoder pulling frames:
 
@@ -90,8 +90,9 @@ dependency, not a choice.
 Cropping has no progress stage of its own: it runs as FFmpeg consumes frames,
 so the encoding bar covers it (`gui/progress.py:expected_stage_count`).
 
-Planning never needs another video's analysis, since the multi-video zoom target
-is the `TORSO_HEIGHT_RATIO` constant.
+Every video is analyzed before any is planned: the zoom target is shared, since
+capping only the video whose climber reaches furthest would leave the others at
+a different scale.
 
 ### Key Domain Concepts
 

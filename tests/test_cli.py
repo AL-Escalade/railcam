@@ -7,6 +7,7 @@ import pytest
 
 from railcam import cli
 from railcam.cli import create_parser
+from railcam.cropping import TORSO_HEIGHT_RATIO
 from railcam.labeling import (
     LABEL_FONT_RATIO,
     SUBLABEL_FONT_RATIO,
@@ -541,3 +542,63 @@ class TestImgszOption:
     def test_below_the_minimum_is_rejected(self, capsys) -> None:
         assert cli.main(["video.mp4", "0", "10", "--imgsz", "320"]) == 1
         assert "--imgsz" in capsys.readouterr().err
+
+
+class TestFramingLimit:
+    """The zoom never frames the climber so close that she leaves the crop."""
+
+    def _analysis(self, reach: float, torso: float = 0.05):
+        analysis = _analysis_for_plan(torso=torso, width=600, height=1000)
+        analysis.body_half_width = reach / 2
+        analysis.body_half_height = reach
+        return analysis
+
+    def test_reach_measured_from_the_landmarks(self) -> None:
+        detection = DetectionResult(
+            frame_num=0,
+            position=PelvisPosition(x=0.5, y=0.5, confidence=0.9),
+            landmarks=[(0.7, 0.9, 0.9), (0.45, 0.2, 0.9)],
+        )
+
+        assert cli._body_reach([detection]) == pytest.approx((0.2, 0.4))
+
+    def test_unsure_landmarks_are_ignored(self) -> None:
+        detection = DetectionResult(
+            frame_num=0,
+            position=PelvisPosition(x=0.5, y=0.5, confidence=0.9),
+            landmarks=[(0.7, 0.9, 0.9), (0.0, 0.0, 0.01)],
+        )
+
+        assert cli._body_reach([detection]) == pytest.approx((0.2, 0.4))
+
+    def test_a_close_climber_caps_the_zoom(self) -> None:
+        far = cli._target_torso_ratio([self._analysis(reach=0.05)], is_multi_video=False)
+        close = cli._target_torso_ratio([self._analysis(reach=0.4)], is_multi_video=False)
+
+        assert close < far
+
+    def test_a_climber_that_fits_keeps_the_usual_target(self) -> None:
+        analysis = self._analysis(reach=0.02, torso=0.05)
+
+        target = cli._target_torso_ratio([analysis], is_multi_video=False)
+
+        assert target == pytest.approx(TORSO_HEIGHT_RATIO)
+
+    def test_every_video_shares_the_most_demanding_limit(self) -> None:
+        roomy = self._analysis(reach=0.05)
+        cramped = self._analysis(reach=0.4)
+
+        target = cli._target_torso_ratio([roomy, cramped], is_multi_video=True)
+
+        assert target == cli._target_torso_ratio([cramped], is_multi_video=True)
+        assert target < cli._target_torso_ratio([roomy], is_multi_video=True)
+
+    def test_the_climber_fits_the_crop_at_the_chosen_zoom(self) -> None:
+        analysis = self._analysis(reach=0.4)
+
+        plan = cli.build_crop_plan(
+            analysis, cli._target_torso_ratio([analysis], is_multi_video=False)
+        )
+
+        reach_px = analysis.body_half_height * analysis.video_height * plan.scale_factor
+        assert reach_px < plan.output_height / 2

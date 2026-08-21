@@ -28,6 +28,7 @@ from railcam.cropping import (
     CropRegion,
     calculate_average_torso_height,
     calculate_crop_dimensions,
+    max_zoom_keeping_body_in_frame,
     resize_interpolation,
     scale_frame,
 )
@@ -53,6 +54,7 @@ from railcam.output import (
     parse_output_format,
 )
 from railcam.pose import (
+    CONFIDENCE_THRESHOLD,
     DEFAULT_MODEL_SIZE,
     MAX_IMGSZ,
     MIN_IMGSZ,
@@ -410,6 +412,11 @@ class VideoAnalysisResult:
     video_width: int
     video_height: int
     frame_count: int
+    # Widest and longest reach from the pelvis over the clip, as fractions of
+    # the video dimensions. The crop is centered on the pelvis, so this is what
+    # has to fit on each side for the climber never to leave the frame.
+    body_half_width: float = 0.0
+    body_half_height: float = 0.0
 
 
 @dataclass
@@ -500,6 +507,28 @@ def _detect_poses_with_tracking(
     )
 
 
+def _body_reach(detections: Sequence[DetectionResult]) -> tuple[float, float]:
+    """Widest and longest reach from the pelvis over a clip.
+
+    Args:
+        detections: Per-frame detections of the selected climber.
+
+    Returns:
+        (half width, half height) as fractions of the video dimensions, both 0
+        when nothing was detected confidently enough to measure.
+    """
+    half_width = half_height = 0.0
+    for detection in detections:
+        if detection.position is None:
+            continue
+        for x, y, confidence in detection.landmarks:
+            if confidence < CONFIDENCE_THRESHOLD:
+                continue
+            half_width = max(half_width, abs(x - detection.position.x))
+            half_height = max(half_height, abs(y - detection.position.y))
+    return half_width, half_height
+
+
 def analyze_video(
     video_input: VideoInput,
     detector: PoseDetector,
@@ -539,6 +568,8 @@ def analyze_video(
     avg_torso = calculate_average_torso_height(pose_result.torso_heights)
     print(f"  Avg torso height: {avg_torso:.3f} (normalized to source)")
 
+    half_width, half_height = _body_reach(pose_result.detections)
+
     return VideoAnalysisResult(
         detections=pose_result.detections,
         detections_by_frame=pose_result.detections_by_frame,
@@ -547,6 +578,8 @@ def analyze_video(
         video_width=metadata.width,
         video_height=metadata.height,
         frame_count=frame_count,
+        body_half_width=half_width,
+        body_half_height=half_height,
     )
 
 
@@ -832,6 +865,54 @@ def _label_lines(
     )
 
 
+def _fitting_torso_ratio(analysis: VideoAnalysisResult) -> float:
+    """Largest torso ratio that still keeps the whole climber inside the crop.
+
+    Args:
+        analysis: Analysis of the video, carrying the climber's reach.
+
+    Returns:
+        The torso height, as a fraction of the output height, that the zoom
+        must not exceed. Unbounded when nothing was measured.
+    """
+    output_width, output_height = calculate_crop_dimensions(
+        analysis.video_width, analysis.video_height
+    )
+    if analysis.avg_torso_height <= 0:
+        return float("inf")
+
+    zoom = max_zoom_keeping_body_in_frame(
+        analysis.body_half_width,
+        analysis.body_half_height,
+        analysis.video_width,
+        analysis.video_height,
+        output_width,
+        output_height,
+    )
+    return zoom * analysis.avg_torso_height * analysis.video_height / output_height
+
+
+def _target_torso_ratio(analyses: Sequence[VideoAnalysisResult], is_multi_video: bool) -> float:
+    """Torso height to zoom every video to, as a fraction of the output height.
+
+    A single video cannot be zoomed out below its measured torso without
+    padding the frame, so it never targets less than what it already shows.
+    Every video then shares the most demanding framing limit: capping only the
+    video that needs it would leave the climbers at different sizes, which is
+    exactly what the zoom normalization exists to prevent.
+
+    Args:
+        analyses: Analysis of every video of the render.
+        is_multi_video: Whether the videos are composed side by side.
+
+    Returns:
+        The shared target torso ratio.
+    """
+    measured = max(analysis.avg_torso_height for analysis in analyses)
+    wanted = TORSO_HEIGHT_RATIO if is_multi_video else max(TORSO_HEIGHT_RATIO, measured)
+    return min(wanted, *(_fitting_torso_ratio(analysis) for analysis in analyses))
+
+
 def plan_videos(
     video_inputs: list[VideoInput],
     detector: PoseDetector,
@@ -842,47 +923,44 @@ def plan_videos(
     """Analyze each video in turn and plan its crop, without cropping yet.
 
     Analysis retains no frames, so this holds only detections and geometry
-    whatever the clip length. Planning does not need the other videos'
-    analyses: the zoom target is TORSO_HEIGHT_RATIO for multi-video output,
-    and derived from the single video otherwise.
+    whatever the clip length. Every video is analyzed before any is planned:
+    the zoom target is shared, so that a video whose climber reaches far does
+    not end up framed at a different scale from the others.
     """
     is_multi_video = len(video_inputs) > 1
-    streams: list[VideoStream] = []
-
     row_ratios = _band_row_ratios(video_inputs)
 
+    analyses = []
     for i, video_input in enumerate(video_inputs):
         if is_multi_video:
             print(f"\n--- Video {i + 1}/{len(video_inputs)}: {video_input.path.name} ---")
+        analyses.append(analyze_video(video_input, detector))
 
-        analysis = analyze_video(video_input, detector)
+    target_torso = _target_torso_ratio(analyses, is_multi_video)
+    wanted = TORSO_HEIGHT_RATIO if is_multi_video else None
+    if wanted is not None and target_torso < wanted:
+        print(
+            f"\nZoom capped to {target_torso:.1%} torso (from {wanted:.1%}) "
+            "to keep every climber inside the frame"
+        )
 
+    streams: list[VideoStream] = []
+    for video_input, analysis in zip(video_inputs, analyses):
         _, image_height = calculate_crop_dimensions(analysis.video_width, analysis.video_height)
         label_lines = _label_lines(video_input, image_height, row_ratios)
 
-        if is_multi_video:
-            # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
-            target_torso = TORSO_HEIGHT_RATIO
-            if analysis.avg_torso_height > TORSO_HEIGHT_RATIO:
-                torso_pct = analysis.avg_torso_height
-                print(f"  Torso ({torso_pct:.1%}) > target ({TORSO_HEIGHT_RATIO:.1%}) - padding")
-            plan = build_crop_plan(
-                analysis,
-                target_torso,
-                debug=debug,
-                label_lines=label_lines,
-            )
-        else:
-            # Single video: can't zoom out, so never target below the measured torso
-            target_torso = max(TORSO_HEIGHT_RATIO, analysis.avg_torso_height)
-            plan = build_crop_plan(
-                analysis,
-                target_torso,
-                debug=debug,
-                target_width=target_width,
-                target_height=target_height,
-                label_lines=label_lines,
-            )
+        if is_multi_video and analysis.avg_torso_height > target_torso:
+            torso_pct = analysis.avg_torso_height
+            print(f"  Torso ({torso_pct:.1%}) > target ({target_torso:.1%}) - padding")
+
+        plan = build_crop_plan(
+            analysis,
+            target_torso,
+            debug=debug,
+            target_width=None if is_multi_video else target_width,
+            target_height=None if is_multi_video else target_height,
+            label_lines=label_lines,
+        )
 
         print_crop_plan(plan, analysis, target_torso)
         streams.append(

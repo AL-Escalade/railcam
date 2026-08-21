@@ -20,6 +20,12 @@ TORSO_HEIGHT_RATIO = 1 / 6
 MIN_ZOOM_FACTOR = 0.5  # Allow zoom out (larger crop) if video dimensions permit
 MAX_ZOOM_FACTOR = 100.0  # Effectively unlimited
 
+# Free space kept between the climber's keypoints and the crop edges, as a
+# fraction of her measured reach. Keypoints stop at the joints, while the feet,
+# the hands and the hair reach past them, and the smoothed crop centre trails
+# the pelvis by a little.
+BODY_MARGIN_RATIO = 0.2
+
 
 def resize_interpolation(scale: float) -> int:
     """Return the OpenCV interpolation suited to resizing by `scale`.
@@ -311,3 +317,41 @@ def calculate_effective_torso_ratio(
     effective_ratio = avg_torso_height / crop_to_source_ratio
 
     return effective_ratio
+
+
+def max_zoom_keeping_body_in_frame(
+    body_half_width: float,
+    body_half_height: float,
+    video_width: int,
+    video_height: int,
+    output_width: int,
+    output_height: int,
+) -> float:
+    """Largest zoom that still leaves the whole climber inside the crop.
+
+    The crop is centered on the pelvis, so what has to fit on each side is the
+    climber's reach from her pelvis, measured over the whole clip and widened
+    by `BODY_MARGIN_RATIO`.
+
+    Args:
+        body_half_width: Widest reach from the pelvis, as a fraction of the
+            video width.
+        body_half_height: Longest reach from the pelvis, as a fraction of the
+            video height.
+        video_width: Source width in pixels.
+        video_height: Source height in pixels.
+        output_width: Crop width in pixels.
+        output_height: Crop height in pixels.
+
+    Returns:
+        The zoom factor, or MAX_ZOOM_FACTOR when no reach was measured.
+    """
+    margin = 1.0 + BODY_MARGIN_RATIO
+    limits = []
+    if body_half_width > 0:
+        limits.append(output_width / 2 / (body_half_width * video_width * margin))
+    if body_half_height > 0:
+        limits.append(output_height / 2 / (body_half_height * video_height * margin))
+    if not limits:
+        return MAX_ZOOM_FACTOR
+    return min(limits)
