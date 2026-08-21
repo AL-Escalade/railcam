@@ -11,7 +11,6 @@ from railcam.pose import (
     PersonDetection,
 )
 from railcam.tracking import (
-    MIN_CLIMB_SPAN,
     _allowed_jump,
     build_tracks,
     repair_track_gaps,
@@ -474,7 +473,7 @@ def test_selection_holds_on_a_section_where_nobody_climbs_far() -> None:
     climber = make_track({f: (0.25, 0.50 - 0.0008 * f) for f in range(90)})
     hold = make_track(dict.fromkeys(range(6), (0.19, 0.62)))
 
-    assert max(climber.climb_rise, hold.climb_rise) < MIN_CLIMB_SPAN
+    assert climber.climb_rise < 0.1  # nobody climbs far in a short section
     assert select_track([climber, hold], ClimberSelector.LEFT) is climber
 
 
@@ -496,7 +495,6 @@ def test_a_track_that_teleports_is_not_a_climb() -> None:
     positions.update(dict.fromkeys(range(40, 60), (0.61, 0.5)))
     phantom = make_track(positions)
 
-    assert phantom.climb_rise > MIN_CLIMB_SPAN * 0.9
     assert phantom.steady_rise < phantom.climb_rise / 2
 
 
@@ -519,3 +517,16 @@ def test_selection_prefers_a_gradual_climb_over_a_teleport() -> None:
     phantom = make_track(jumped)
 
     assert select_track([climber, phantom], ClimberSelector.LEFT) is climber
+
+
+def test_two_climbers_are_both_kept_when_one_rises_less() -> None:
+    """Frames 293-389 of a final: the right climber rose 0.093, the left 0.110.
+
+    An absolute threshold at 0.10 left her out of the running, so --climber
+    right returned the left one.
+    """
+    left = make_track({f: (0.31, 0.70 - 0.0011 * f) for f in range(97)})
+    right = make_track({f: (0.66, 0.70 - 0.0009 * f) for f in range(97)})
+
+    assert select_track([left, right], ClimberSelector.RIGHT) is right
+    assert select_track([left, right], ClimberSelector.LEFT) is left

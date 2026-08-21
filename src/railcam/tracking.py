@@ -46,10 +46,10 @@ MIN_STEP_BUDGET = 0.01
 # other lane's climber and the belayer at the foot of the wall, which the
 # euclidean budget alone lets in once the gap widens.
 MAX_LANE_DRIFT = 0.10
-# Minimum upward displacement, jumps aside, for a track to qualify as a climber.
-MIN_CLIMB_SPAN = 0.10
-# A climbing track must also cover at least this fraction of the best track's
-# rise, so detection fragments cannot outrank a full climb.
+# A climbing track must cover at least this fraction of the best track's rise,
+# so detection fragments cannot outrank a full climb. The bar is relative on
+# purpose: an absolute one either excluded a climber whose section of the wall
+# is short, or admitted a hold as the only candidate when it alone cleared it.
 MIN_RELATIVE_SPAN = 0.5
 # ... and be detected on at least this fraction of the frames the best-covered
 # climbing track holds. Pose models report the occasional hold as a person, and
@@ -241,22 +241,15 @@ def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None
 
     Tracks that barely move next to the best one (static bystanders) are
     excluded, as are those found on far fewer frames than it -- a pose model
-    reporting a hold as a person. Both cuts are relative, so they still hold
-    on a section where nobody clears the absolute climbing threshold.
+    reporting a hold as a person. Both cuts are relative to what this clip
+    actually holds, since how far a climber rises through the frame depends
+    entirely on the section and the framing.
     """
     if not tracks:
         return None
 
-    # The absolute threshold only picks the pool: a short section near the top
-    # of the wall can leave every track below it, and the run still has a
-    # climber. The relative cuts then apply either way, so a bystander or a
-    # hold never wins by default.
-    candidates = [track for track in tracks if track.steady_rise >= MIN_CLIMB_SPAN] or tracks
-
-    best_rise = max(track.steady_rise for track in candidates)
-    candidates = [
-        track for track in candidates if track.steady_rise >= MIN_RELATIVE_SPAN * best_rise
-    ]
+    best_rise = max(track.steady_rise for track in tracks)
+    candidates = [track for track in tracks if track.steady_rise >= MIN_RELATIVE_SPAN * best_rise]
     best_coverage = max(len(track.detections) for track in candidates)
     candidates = [
         track
