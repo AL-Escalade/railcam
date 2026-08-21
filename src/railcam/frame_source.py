@@ -13,7 +13,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from railcam.video import VideoError, VideoMetadata, get_video_metadata
+from railcam.video import VideoError, VideoMetadata, get_video_metadata, open_capture
 
 # Full-resolution BGR frames are heavy (~6 MB at 1080p): keep the cache small.
 DEFAULT_CACHE_SIZE = 32
@@ -33,7 +33,7 @@ class FrameSource:
         if self._metadata.total_frames <= 0:
             raise VideoError(f"Video has no readable frames: {path}")
 
-        self._cap = cv2.VideoCapture(str(path))
+        self._cap = open_capture(path)
         if not self._cap.isOpened():
             raise VideoError(f"Failed to open video: {path}")
 

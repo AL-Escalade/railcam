@@ -51,11 +51,32 @@ def validate_video_path(path: Path) -> None:
         )
 
 
+def open_capture(path: Path) -> cv2.VideoCapture:
+    """Open a video, applying the display rotation stored in its metadata.
+
+    Cameras record an orientation in the container instead of rotating the
+    pixels, and OpenCV serves those pixels as stored unless asked otherwise.
+    A wall filmed with the camera on its side would then arrive lying down,
+    where the climber moves sideways and both lanes share a column -- which
+    silently defeats track selection, the left/right choice and the portrait
+    crop, all of which assume a climber rising through an upright frame.
+
+    Args:
+        path: Video file to open.
+
+    Returns:
+        An open capture whose frames and dimension properties are upright.
+    """
+    cap = cv2.VideoCapture(str(path))
+    cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
+    return cap
+
+
 def get_video_metadata(path: Path) -> VideoMetadata:
     """Extract metadata from a video file."""
     validate_video_path(path)
 
-    cap = cv2.VideoCapture(str(path))
+    cap = open_capture(path)
     try:
         if not cap.isOpened():
             raise VideoError(f"Failed to open video: {path}")
@@ -104,7 +125,7 @@ def extract_frames(
     Yields tuples of (frame_number, frame_data) for each frame in the range.
     Frame numbers are 0-indexed and the range is inclusive of both start and end.
     """
-    cap = cv2.VideoCapture(str(path))
+    cap = open_capture(path)
     try:
         if not cap.isOpened():
             raise VideoError(f"Failed to open video: {path}")
