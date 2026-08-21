@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +32,13 @@ from railcam.cropping import (
     scale_frame,
 )
 from railcam.frame_source import FrameSource
-from railcam.labeling import LABEL_BAND_RATIO, append_label_band, band_height
+from railcam.labeling import (
+    LABEL_BAND_RATIO,
+    SUBLABEL_BAND_RATIO,
+    LabelLine,
+    append_label_band,
+    band_height,
+)
 from railcam.multi_video import (
     InputParseError,
     VideoInput,
@@ -114,6 +120,10 @@ Examples:
   railcam --input v1.mp4:0:100 --input v2.mp4:0:150 --label "Dupont" --label "Martin"
   railcam --input v1.mp4:0:100 --input v2.mp4:0:150 --label "Dupont"  # second one unlabeled
   railcam video.mp4 100 250 --label="-Dupont"  # attached form, for a label starting with -
+
+  # Second line, drawn smaller under the label (paired with the inputs too)
+  railcam video.mp4 100 250 --label "Dupont" --sublabel "4.704"
+  railcam --input v1.mp4:0:100 --input v2.mp4:0:150 --sublabel "4.704" --sublabel "5.120"
         """,
     )
 
@@ -160,6 +170,17 @@ Examples:
         "Labels are paired with the inputs in the order they are given; "
         "inputs left without a label get an empty band. "
         "Use --label=TEXT when the text starts with a dash.",
+    )
+
+    parser.add_argument(
+        "--sublabel",
+        type=str,
+        action="append",
+        dest="sublabels",
+        metavar="TEXT",
+        help="Second line, drawn under the label in a smaller font (can be repeated). "
+        "Paired with the inputs like --label, and usable without a label. "
+        "Use --sublabel=TEXT when the text starts with a dash.",
     )
 
     # Climber selection (for positional mode)
@@ -237,6 +258,53 @@ Examples:
     return parser
 
 
+def _text_for_single_video(values: list[str], option: str) -> str:
+    """Return the single text given for a repeatable text option.
+
+    Args:
+        values: Texts in the order they were given.
+        option: Option name, for the error message.
+
+    Returns:
+        The text, or an empty string when none was given.
+
+    Raises:
+        SystemExit: If more than one text was given.
+    """
+    if len(values) > 1:
+        print(
+            f"Error: {len(values)} {option} options given for a single video. "
+            "Use --input to render several videos.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return values[0] if values else ""
+
+
+def _texts_for_inputs(values: list[str], input_count: int, option: str) -> list[str]:
+    """Pair the texts given for a repeatable text option with the inputs.
+
+    Args:
+        values: Texts in the order they were given.
+        input_count: Number of inputs they are paired with.
+        option: Option name, for the error message.
+
+    Returns:
+        One text per input, empty where none was given.
+
+    Raises:
+        SystemExit: If more texts than inputs were given.
+    """
+    if len(values) > input_count:
+        print(
+            f"Error: {len(values)} {option} option(s) given for {input_count} input(s). "
+            f"{option} values are paired with the inputs in order.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return values + [""] * (input_count - len(values))
+
+
 def validate_args(args: argparse.Namespace) -> list[VideoInput]:
     """Validate and convert arguments to VideoInput list.
 
@@ -249,6 +317,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
     has_positional = args.video is not None
     has_inputs = args.inputs is not None and len(args.inputs) > 0
     labels: list[str] = list(args.labels or [])
+    sublabels: list[str] = list(args.sublabels or [])
 
     if has_positional and has_inputs:
         print(
@@ -274,13 +343,8 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
             )
             sys.exit(1)
 
-        if len(labels) > 1:
-            print(
-                f"Error: {len(labels)} --label options given for a single video. "
-                "Use --input to render several videos.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        label = _text_for_single_video(labels, "--label")
+        sublabel = _text_for_single_video(sublabels, "--sublabel")
 
         # Parse climber selector for positional mode
         climber_selector = ClimberSelector.AUTO
@@ -295,7 +359,8 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
                 start_frame=args.start_frame,
                 end_frame=args.end_frame,
                 climber_selector=climber_selector,
-                label=labels[0] if labels else "",
+                label=label,
+                sublabel=sublabel,
             )
         ]
 
@@ -308,13 +373,8 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
         )
         sys.exit(1)
 
-    if len(labels) > len(args.inputs):
-        print(
-            f"Error: {len(labels)} --label option(s) given for {len(args.inputs)} input(s). "
-            "Labels are paired with the inputs in order.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    labels = _texts_for_inputs(labels, len(args.inputs), "--label")
+    sublabels = _texts_for_inputs(sublabels, len(args.inputs), "--sublabel")
 
     try:
         video_inputs = [parse_input_spec(spec) for spec in args.inputs]
@@ -322,8 +382,9 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    for video_input, label in zip(video_inputs, labels):
-        video_input.label = label
+    for video_input, text, subtext in zip(video_inputs, labels, sublabels):
+        video_input.label = text
+        video_input.sublabel = subtext
 
     return video_inputs
 
@@ -499,7 +560,7 @@ class CropPlan:
     disagreed when a requested range ran past the end of a file, which skewed
     multi-video durations. The positions are the only count.
 
-    `output_height` stays the height of the image alone; the label band is kept
+    `output_height` stays the height of the image alone; the band rows are kept
     beside it so it never has to be recovered from an already rounded total.
     """
 
@@ -514,13 +575,12 @@ class CropPlan:
     debug: bool = False
     target_width: int | None = None
     target_height: int | None = None
-    label: str = ""
-    label_band_height: int = 0
+    label_lines: tuple[LabelLine, ...] = ()
 
     @property
     def frame_height(self) -> int:
         """Height of an emitted frame before scaling: image plus label band."""
-        return self.output_height + self.label_band_height
+        return self.output_height + sum(line.height for line in self.label_lines)
 
     @property
     def final_size(self) -> tuple[int, int]:
@@ -542,8 +602,7 @@ def build_crop_plan(
     debug: bool = False,
     target_width: int | None = None,
     target_height: int | None = None,
-    label: str = "",
-    label_band_height: int = 0,
+    label_lines: Sequence[LabelLine] = (),
 ) -> CropPlan:
     """Compute the crop geometry from an analysis, without reading any frame.
 
@@ -557,8 +616,8 @@ def build_crop_plan(
         debug: Whether cropped frames get the pose overlay.
         target_width: Requested output width, or None.
         target_height: Requested output height, or None.
-        label: Text drawn under the image; empty for no text.
-        label_band_height: Height in pixels of the band under the image, 0 for none.
+        label_lines: Rows of the band drawn under the image, top to bottom;
+            empty for no band.
 
     Returns:
         The crop plan for this video.
@@ -592,8 +651,7 @@ def build_crop_plan(
         debug=debug,
         target_width=target_width,
         target_height=target_height,
-        label=label,
-        label_band_height=label_band_height,
+        label_lines=tuple(label_lines),
     )
 
 
@@ -605,9 +663,10 @@ def print_crop_plan(plan: CropPlan, analysis: VideoAnalysisResult, target_ratio:
     print(f"  Scale factor: {plan.scale_factor:.2f}x (target torso: {target_ratio:.1%})")
     print(f"  Output size: {plan.output_width}x{plan.output_height}")
     print(f"  Scaled frame: {plan.scaled_width}x{plan.scaled_height}")
-    if plan.label_band_height:
+    if plan.label_lines:
+        band = plan.frame_height - plan.output_height
         print(
-            f"  Label band: {plan.label_band_height}px "
+            f"  Label band: {band}px over {len(plan.label_lines)} row(s) "
             f"(frame {plan.output_width}x{plan.frame_height})"
         )
     if plan.needs_padding:
@@ -677,7 +736,7 @@ def _crop_one_frame(
         )
 
     # Before the output scaling, so the band keeps its proportion at any size
-    cropped = append_label_band(cropped, plan.label, plan.label_band_height)
+    cropped = append_label_band(cropped, plan.label_lines)
 
     if plan.target_width is not None or plan.target_height is not None:
         cropped = scale_frame(cropped, plan.target_width, plan.target_height)
@@ -733,6 +792,45 @@ class VideoStream:
         return crop_frames(self.plan, self.video_input, self.detections_by_frame, on_progress)
 
 
+def _band_row_ratios(video_inputs: Sequence[VideoInput]) -> list[float]:
+    """Row heights of the label band, as fractions of the image height.
+
+    The layout belongs to the render, not to a single video: composition
+    normalizes heights by scaling, so a video left without a row would have its
+    image scaled by another factor and lose the torso normalization.
+
+    Args:
+        video_inputs: Every video of the render.
+
+    Returns:
+        One ratio per row, top to bottom; empty when no video has any text.
+    """
+    if any(v.sublabel for v in video_inputs):
+        return [LABEL_BAND_RATIO, SUBLABEL_BAND_RATIO]
+    if any(v.label for v in video_inputs):
+        return [LABEL_BAND_RATIO]
+    return []
+
+
+def _label_lines(
+    video_input: VideoInput, image_height: int, ratios: Sequence[float]
+) -> tuple[LabelLine, ...]:
+    """Build this video's band rows for the render's row layout.
+
+    Args:
+        video_input: Video whose texts fill the rows.
+        image_height: Height of the cropped image the band sits under.
+        ratios: Row height ratios shared by every video of the render.
+
+    Returns:
+        The rows, with an empty text where this video has none.
+    """
+    texts = (video_input.label, video_input.sublabel)
+    return tuple(
+        LabelLine(text, band_height(image_height, ratio)) for text, ratio in zip(texts, ratios)
+    )
+
+
 def plan_videos(
     video_inputs: list[VideoInput],
     detector: PoseDetector,
@@ -750,10 +848,7 @@ def plan_videos(
     is_multi_video = len(video_inputs) > 1
     streams: list[VideoStream] = []
 
-    # The band belongs to the render, not to a single label: composition
-    # normalizes heights by scaling, so a video left without a band would have
-    # its image scaled by another factor and lose the torso normalization
-    label_ratio = LABEL_BAND_RATIO if any(v.label for v in video_inputs) else 0.0
+    row_ratios = _band_row_ratios(video_inputs)
 
     for i, video_input in enumerate(video_inputs):
         if is_multi_video:
@@ -762,7 +857,7 @@ def plan_videos(
         analysis = analyze_video(video_input, detector)
 
         _, image_height = calculate_crop_dimensions(analysis.video_width, analysis.video_height)
-        video_band_height = band_height(image_height, label_ratio)
+        label_lines = _label_lines(video_input, image_height, row_ratios)
 
         if is_multi_video:
             # Always target TORSO_HEIGHT_RATIO (1/6) for normalized output
@@ -774,8 +869,7 @@ def plan_videos(
                 analysis,
                 target_torso,
                 debug=debug,
-                label=video_input.label,
-                label_band_height=video_band_height,
+                label_lines=label_lines,
             )
         else:
             # Single video: can't zoom out, so never target below the measured torso
@@ -786,8 +880,7 @@ def plan_videos(
                 debug=debug,
                 target_width=target_width,
                 target_height=target_height,
-                label=video_input.label,
-                label_band_height=video_band_height,
+                label_lines=label_lines,
             )
 
         print_crop_plan(plan, analysis, target_torso)

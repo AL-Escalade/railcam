@@ -266,3 +266,65 @@ class TestDetectionResolution:
 
         with pytest.raises(ProjectError):
             Project.load(target)
+
+
+def test_round_trip_preserves_sublabels(tmp_path: Path) -> None:
+    project = Project(
+        videos=[
+            VideoEntry(
+                path=tmp_path / "a.mp4",
+                start_frame=0,
+                end_frame=10,
+                label="Dupont",
+                sublabel="4.704",
+            ),
+            VideoEntry(path=tmp_path / "b.mp4", start_frame=0, end_frame=10),
+        ],
+        render=RenderOptions(),
+    )
+    project_file = tmp_path / "session.railcam.json"
+
+    project.save(project_file)
+    loaded = Project.load(project_file)
+
+    assert [video.sublabel for video in loaded.videos] == ["4.704", ""]
+    assert loaded == project
+
+
+def test_project_written_before_sublabels_existed_loads_with_empty_sublabels(
+    tmp_path: Path,
+) -> None:
+    project_file = tmp_path / "session.railcam.json"
+    project_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "videos": [{"path": "a.mp4", "start_frame": 0, "end_frame": 10, "label": "Dupont"}],
+                "render": {},
+                "output_path": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = Project.load(project_file)
+
+    assert loaded.videos[0].label == "Dupont"
+    assert loaded.videos[0].sublabel == ""
+
+
+def test_load_rejects_non_string_sublabel(tmp_path: Path) -> None:
+    project_file = tmp_path / "bad-sublabel.railcam.json"
+    project_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "videos": [{"path": "a.mp4", "start_frame": 0, "end_frame": 10, "sublabel": 4.7}],
+                "render": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProjectError, match="sublabel"):
+        Project.load(project_file)

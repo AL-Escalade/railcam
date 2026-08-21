@@ -142,7 +142,7 @@ class FrameDisplay(QLabel):
 
 
 class PlayerWidget(QFrame):
-    """One video of the session: navigation, range selection, climber choice and label."""
+    """One video of the session: navigation, range selection, climber choice and labels."""
 
     stateChanged = Signal()
     removeRequested = Signal()
@@ -230,6 +230,12 @@ class PlayerWidget(QFrame):
         self.label_edit.setToolTip("Texte affiché sous l'image dans la vidéo rendue")
         self.label_edit.textChanged.connect(lambda _: self.stateChanged.emit())
         range_row.addWidget(self.label_edit)
+        range_row.addWidget(QLabel("Sous-légende :"))
+        self.sublabel_edit = QLineEdit()
+        self.sublabel_edit.setPlaceholderText("Temps, catégorie…")
+        self.sublabel_edit.setToolTip("Seconde ligne, affichée sous la légende en plus petit")
+        self.sublabel_edit.textChanged.connect(lambda _: self.stateChanged.emit())
+        range_row.addWidget(self.sublabel_edit)
         range_row.addWidget(QLabel("Grimpeur :"))
         self.climber_combo = QComboBox()
         for value, label in CLIMBER_LABELS:
@@ -250,6 +256,10 @@ class PlayerWidget(QFrame):
     def label(self) -> str:
         return self.label_edit.text()
 
+    @property
+    def sublabel(self) -> str:
+        return self.sublabel_edit.text()
+
     def to_video_entry(self) -> VideoEntry:
         return VideoEntry(
             path=self.source.path,
@@ -257,16 +267,18 @@ class PlayerWidget(QFrame):
             end_frame=self.end_frame,
             climber=self.climber,
             label=self.label,
+            sublabel=self.sublabel,
         )
 
     def apply_entry(self, entry: VideoEntry) -> None:
-        """Restore range, climber and label from a project entry."""
+        """Restore range, climber and labels from a project entry."""
         self.start_frame = entry.start_frame
         self.end_frame = entry.end_frame
         index = self.climber_combo.findData(entry.climber)
         if index >= 0:
             self.climber_combo.setCurrentIndex(index)
         self.label_edit.setText(entry.label)
+        self.sublabel_edit.setText(entry.sublabel)
         self.timeline.set_range(self.start_frame, self.end_frame)
         self.display_frame(self.start_frame)
         self._refresh_labels()

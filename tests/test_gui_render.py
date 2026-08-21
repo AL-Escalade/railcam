@@ -194,3 +194,61 @@ class TestDetectionResolutionArgs:
         args = build_cli_args(project)
 
         assert args[args.index("--imgsz") + 1] == "1280"
+
+
+def test_build_args_omits_sublabel_when_no_video_has_one() -> None:
+    project = Project(
+        videos=[
+            VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10, label="Dupont"),
+            VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10),
+        ],
+        render=RenderOptions(),
+    )
+
+    assert not any(arg.startswith("--sublabel") for arg in build_cli_args(project))
+
+
+def test_build_args_emits_one_sublabel_per_video_when_any_has_one() -> None:
+    project = Project(
+        videos=[
+            VideoEntry(
+                path=Path("a.mp4"), start_frame=0, end_frame=10, label="Dupont", sublabel="4.704"
+            ),
+            VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10, label="Zhao"),
+        ],
+        render=RenderOptions(),
+    )
+
+    args = build_cli_args(project)
+
+    assert args == [
+        "-i",
+        "a.mp4:0:10",
+        "--label=Dupont",
+        "--sublabel=4.704",
+        "-i",
+        "b.mp4:0:10",
+        "--label=Zhao",
+        "--sublabel=",
+    ]
+
+
+def test_build_args_emits_sublabel_without_any_label() -> None:
+    project = Project(
+        videos=[VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10, sublabel="4.704")],
+        render=RenderOptions(),
+    )
+
+    assert build_cli_args(project) == ["-i", "a.mp4:0:10", "--sublabel=4.704"]
+
+
+@pytest.mark.parametrize("sublabel", ["-4.704", "O'Brien", '4.704 "PB"', "a;rm -rf x"])
+def test_displayed_command_survives_a_shell_round_trip_with_a_sublabel(sublabel: str) -> None:
+    project = Project(
+        videos=[VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10, sublabel=sublabel)],
+        render=RenderOptions(),
+    )
+
+    command = format_cli_command(project)
+
+    assert shlex.split(command) == ["railcam", *build_cli_args(project)]

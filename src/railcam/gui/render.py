@@ -46,15 +46,19 @@ def build_cli_args(project: Project) -> list[str]:
     """Build the railcam CLI argument list, omitting options at their defaults."""
     defaults = RenderOptions()
     args: list[str] = []
-    # Labels are paired with the inputs positionally, so as soon as one video
-    # is labeled every video needs its own --label to keep the pairing right.
+    # Label lines are paired with the inputs positionally, so as soon as one
+    # video uses a line every video needs its own option to keep the pairing
+    # right.
     any_label = any(video.label for video in project.videos)
+    any_sublabel = any(video.sublabel for video in project.videos)
     for video in project.videos:
         args.extend(["-i", _input_spec(video)])
         if any_label:
             # Single token: a label is free text and one starting with a dash
             # would be read as an option name in the two-token form.
             args.append(f"--label={video.label}")
+        if any_sublabel:
+            args.append(f"--sublabel={video.sublabel}")
 
     render = project.render
     if render.format != defaults.format:

@@ -46,8 +46,8 @@ Just reproducible, normalized clips ready for **performance analysis, coaching, 
   Compare multiple climbers or runs in a single synchronized output.
 
 * **Per-video label**
-  Optional name displayed in a band under each video, so a comparison says who
-  is who.
+  Optional name displayed in a band under each video, with a smaller second
+  line for the time, so a comparison says who is who.
 
 * **MP4 & GIF output**
   High-quality H.264 MP4 or lightweight GIF.
@@ -143,8 +143,9 @@ The GUI lets you:
 - Set each video's start/end frame from the displayed image — start frames
   are the synchronization points (t=0), exactly like the CLI
 - Choose the climber (auto/left/right) per video
-- Give each video a **Légende** — the text displayed under its image in the
-  rendered file (leave it empty to render without a band)
+- Give each video a **Légende** and an optional **Sous-légende** — the texts
+  displayed under its image in the rendered file, the second one smaller
+  (leave them empty to render without a band)
 - Play all videos synchronized in slow motion (space bar to play/pause)
   to check the timing before rendering
 - Configure render options, see the equivalent CLI command live (copyable),
@@ -191,6 +192,7 @@ Each input is processed independently, then composed horizontally.
 | `-i, --input PATH:START:END[:left\|right]` | Input spec (repeatable) |
 | `-c, --climber {left,right}`               | Select climber          |
 | `--label TEXT`                             | Label under a video (repeatable) |
+| `--sublabel TEXT`                          | Second label line, smaller (repeatable) |
 | `-o, --output PATH`                        | Output path             |
 | `-f, --format {mp4,gif}`                   | Output format           |
 | `-w, --width PIXELS`                       | Output width            |
@@ -253,10 +255,27 @@ with railcam (so a label looks the same on every machine). A label starting with
 a dash must use the attached form, `--label="-Dupont"`, otherwise it is read as
 an option name.
 
+`--sublabel` adds an optional second line under the label, drawn smaller — for
+the name on the first line and the time, category or date on the second:
+
+```bash
+railcam \
+  --input run1.mp4:100:250 --label "Dupont" --sublabel "4.704" \
+  --input run2.mp4:80:230  --label "Martin" --sublabel "5.120"
+```
+
+It follows the same rules as `--label`: repeatable, paired with the inputs in
+the order they are given, empty by default, attached form `--sublabel="-0.120"`
+for a text starting with a dash. It can be used without a `--label`, in which
+case the first line stays empty.
+
 Note: the band is added *under* the 5:3 crop, so a labeled output is slightly
-taller than 5:3. The image itself keeps its 5:3 ratio and its zoom
-normalization — in multi-video mode every video gets a band of the same
-relative height as soon as one of them is labeled.
+taller than 5:3, and taller again when a second line is used. The image itself
+keeps its 5:3 ratio and its zoom normalization — in multi-video mode every video
+gets the same rows, of the same relative height, as soon as one of them uses
+them.
+
+The GUI exposes both as **Légende** and **Sous-légende** on each video card.
 
 ---
 

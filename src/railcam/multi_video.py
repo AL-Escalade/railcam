@@ -22,6 +22,7 @@ class VideoInput:
     end_frame: int
     climber_selector: ClimberSelector = ClimberSelector.AUTO
     label: str = ""
+    sublabel: str = ""
 
     def __post_init__(self) -> None:
         """Validate the input specification."""

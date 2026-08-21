@@ -42,13 +42,14 @@ class ProjectError(Exception):
 
 @dataclass
 class VideoEntry:
-    """One video in a session: source file, frame range, climber choice and label."""
+    """One video in a session: source file, frame range, climber choice and labels."""
 
     path: Path
     start_frame: int
     end_frame: int
     climber: str = "auto"
     label: str = ""
+    sublabel: str = ""
 
 
 @dataclass
@@ -83,6 +84,7 @@ class Project:
                     "end_frame": video.end_frame,
                     "climber": video.climber,
                     "label": video.label,
+                    "sublabel": video.sublabel,
                 }
                 for video in self.videos
             ],
@@ -164,6 +166,11 @@ def _load_video_entry(entry: Any, project_dir: Path) -> VideoEntry:
     if not isinstance(label, str):
         raise ProjectError(f"Invalid label: {label!r}. Expected a string.")
 
+    # Absent in project files written before second label lines existed
+    sublabel = entry.get("sublabel", "")
+    if not isinstance(sublabel, str):
+        raise ProjectError(f"Invalid sublabel: {sublabel!r}. Expected a string.")
+
     path = Path(raw_path)
     if not path.is_absolute():
         path = project_dir / path
@@ -173,6 +180,7 @@ def _load_video_entry(entry: Any, project_dir: Path) -> VideoEntry:
         end_frame=end_frame,
         climber=climber,
         label=label,
+        sublabel=sublabel,
     )
 
 
