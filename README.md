@@ -272,7 +272,7 @@ case the first line stays empty.
 Note: the band is added *under* the 5:3 crop, so a labeled output is slightly
 taller than 5:3, and taller again when a second line is used. The image itself
 keeps its 5:3 ratio and its zoom normalization — in multi-video mode every video
-gets the same rows, of the same relative height, as soon as one of them uses
+gets the same lines, at the same relative size, as soon as one of them uses
 them.
 
 The GUI exposes both as **Légende** and **Sous-légende** on each video card.

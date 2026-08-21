@@ -31,9 +31,10 @@ to empty.
 ### Requirement: Per-Video Label Band
 
 The system SHALL accept an optional text label for each input video and SHALL
-render it, horizontally centered, in the first row of a solid band appended
-under that video's cropped image. The band SHALL be a stack of rows, each row
-carrying its own text and its own height. The label SHALL default to empty.
+render it, horizontally centered, on the first line of a solid band appended
+under that video's cropped image. The band SHALL be a stack of lines, each
+drawn at its own size, and its height SHALL follow from those sizes. The label
+SHALL default to empty.
 
 #### Scenario: No label given
 
@@ -46,15 +47,22 @@ carrying its own text and its own height. The label SHALL default to empty.
 - **WHEN** an input has a non-empty label
 - **THEN** the emitted frames SHALL be taller than the cropped image by the band
   height
-- **AND** the label text SHALL be centered horizontally within its row
+- **AND** the label text SHALL be centered horizontally on its line
 - **AND** the cropped image SHALL keep its 5:3 aspect ratio, unchanged by the band
 
 #### Scenario: Band height proportional to the image
 
 - **WHEN** the band is added
-- **THEN** the height of each of its rows SHALL be a fixed fraction of the
-  cropped image height
-- **AND** each row SHALL be an even number of pixels
+- **THEN** each line SHALL be drawn at a fixed fraction of the cropped image
+  height
+- **AND** the band SHALL leave the same space above its first line as below its
+  last one
+- **AND** the band SHALL be an even number of pixels
+
+#### Scenario: Band height independent of the words
+
+- **WHEN** two videos carry labels of different lengths
+- **THEN** their bands SHALL have the same height
 
 #### Scenario: Label wider than the frame
 
@@ -77,8 +85,8 @@ carrying its own text and its own height. The label SHALL default to empty.
 ### Requirement: Uniform Band In Multi-Video Output
 
 When several videos are composed side by side, the system SHALL give every video
-the same rows, of the same relative heights, as soon as any one of them uses a
-row, so that height normalization scales all images by the same factor.
+the same lines, at the same relative sizes, as soon as any one of them uses a
+line, so that height normalization scales all images by the same factor.
 
 #### Scenario: One labeled video among several
 

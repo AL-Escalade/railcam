@@ -11,21 +11,30 @@ from importlib import resources
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# Row heights as a fraction of the cropped image height
-LABEL_BAND_RATIO = 0.08
-SUBLABEL_BAND_RATIO = 0.042
+# Text sizes as a fraction of the cropped image height
+LABEL_FONT_RATIO = 0.04
+SUBLABEL_FONT_RATIO = 0.021
 
-# Space left between the drawn pixels of two adjacent rows, as a fraction of
-# the upper row's height. Centering each row in its own box put a hole between
-# a label and its second line wider than that second line, reading as two
-# unrelated captions instead of one two-line caption.
-LINE_GAP_RATIO = 0.12
+# Space above the first line and below the last, as a fraction of the first
+# line's size. The band is measured from its text rather than the other way
+# round, so this padding is the same above and below by construction -- when
+# lines were centered in fixed boxes instead, the label sat further from the
+# image than the last line sat from the bottom edge.
+BAND_PAD_RATIO = 0.6
+
+# Space between two lines' drawn pixels, as a fraction of the upper line's
+# size. Kept well under the padding so a label and its second line read as one
+# caption rather than as two.
+LINE_GAP_RATIO = 0.2
 
 LABEL_COLOR = 255
 BAND_COLOR = 0
 
-# Cap height targeted inside the band, as a fraction of its height
-CAP_HEIGHT_RATIO = 0.5
+# Measured to size a line's slot: the tallest a line can draw at a given size,
+# cap height plus descender, whatever the text actually holds. Sizing a slot
+# from its own text would make the band height depend on the words, and two
+# videos composed side by side would then get bands of different heights.
+REFERENCE_TEXT = "Hg"
 
 # Fraction of the frame width the text may occupy before it is shrunk
 USABLE_WIDTH_RATIO = 0.9
@@ -41,16 +50,16 @@ class LabelFontError(Exception):
 
 @dataclass(frozen=True)
 class LabelLine:
-    """One row of the label band.
+    """One line of the label band.
 
     Attributes:
-        text: Text drawn as typed, centered in the row; empty for a blank row.
-        height: Row height in pixels; the font follows it, so a smaller row
-            means smaller characters.
+        text: Text drawn as typed, centered on the band; empty for a blank line,
+            which still takes its place so every video's band matches.
+        size: Font size in pixels.
     """
 
     text: str
-    height: int
+    size: int
 
 
 @cache
@@ -73,24 +82,49 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
         raise LabelFontError(f"Cannot load the label font {FONT_FILE}: {e}") from e
 
 
-def band_height(image_height: int, ratio: float = LABEL_BAND_RATIO) -> int:
-    """Compute a band row height for an image of the given height.
+def font_size(image_height: int, ratio: float = LABEL_FONT_RATIO) -> int:
+    """Text size for a line drawn under an image of the given height.
 
     Args:
         image_height: Height in pixels of the cropped image the band sits under.
-        ratio: Row height as a fraction of the image height.
+        ratio: Text size as a fraction of the image height.
 
     Returns:
-        An even number of pixels, or 0 when no row is requested (ratio of 0 or
-        a non-positive image height). Encoders reject odd dimensions for some
-        pixel formats, hence the even rounding.
+        A size in pixels, or 0 when no line is requested (ratio of 0 or a
+        non-positive image height).
     """
     if ratio <= 0 or image_height <= 0:
         return 0
+    # A requested line must stay legible, however small the image is
+    return max(int(round(image_height * ratio)), 1)
 
-    height = int(round(image_height * ratio / 2)) * 2
-    # A requested band must stay visible, however small the image is
-    return max(height, 2)
+
+@cache
+def _slot_height(size: int) -> int:
+    """Height reserved for a line of this size, text-independent."""
+    _, top, _, bottom = _ink_box(REFERENCE_TEXT, _font(size))
+    return bottom - top
+
+
+def band_height(lines: Sequence[LabelLine]) -> int:
+    """Total height of the band drawn under the image.
+
+    Args:
+        lines: Lines of the band, top to bottom.
+
+    Returns:
+        An even number of pixels, or 0 when no line has a size. Encoders reject
+        odd dimensions for some pixel formats, hence the even rounding.
+    """
+    drawn = [line for line in lines if line.size > 0]
+    if not drawn:
+        return 0
+
+    padding = 2 * round(drawn[0].size * BAND_PAD_RATIO)
+    slots = sum(_slot_height(line.size) for line in drawn)
+    gaps = sum(round(line.size * LINE_GAP_RATIO) for line in drawn[:-1])
+    total = padding + slots + gaps
+    return total + total % 2
 
 
 def _ink_box(text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int, int, int]:
@@ -99,18 +133,18 @@ def _ink_box(text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int, int, in
     return int(left), int(top), int(right), int(bottom)
 
 
-def _fitted_font(text: str, row_pixels: int, frame_width: int) -> ImageFont.FreeTypeFont:
-    """Pick the font size that fits both the row height and the usable width.
+def _fitted_font(text: str, size: int, frame_width: int) -> ImageFont.FreeTypeFont:
+    """Font for a line, reduced when the text would run past the usable width.
 
     Args:
-        text: Label text to measure.
-        row_pixels: Height of the row the text is drawn in.
+        text: Line text to measure.
+        size: Nominal font size in pixels.
         frame_width: Width of the frame the band spans.
 
     Returns:
         The font to draw with.
     """
-    font = _font(max(int(row_pixels * CAP_HEIGHT_RATIO), 1))
+    font = _font(max(size, 1))
     left, _, right, _ = _ink_box(text, font)
     text_width = right - left
     usable_width = frame_width * USABLE_WIDTH_RATIO
@@ -119,34 +153,8 @@ def _fitted_font(text: str, row_pixels: int, frame_width: int) -> ImageFont.Free
     return font
 
 
-def _ink_top_in_row(rows: Sequence[LabelLine], index: int, ink_height: int) -> int:
-    """Where a row's drawn pixels start within that row.
-
-    A row on its own is centered in its box, as a single label always was. A
-    row that has a neighbour instead hugs the boundary they share, leaving
-    only half the gap on that side, so the two texts read as one caption.
-
-    Args:
-        rows: All rows of the band, in order.
-        index: Index of the row being placed.
-        ink_height: Height of that row's drawn pixels.
-
-    Returns:
-        Offset in pixels from the top of the row.
-    """
-    row = rows[index]
-    above = rows[index - 1] if index > 0 and rows[index - 1].text.strip() else None
-    below = rows[index + 1] if index + 1 < len(rows) and rows[index + 1].text.strip() else None
-
-    if above is not None and below is None:
-        return int(above.height * LINE_GAP_RATIO) // 2
-    if below is not None and above is None:
-        return row.height - ink_height - int(row.height * LINE_GAP_RATIO) // 2
-    return (row.height - ink_height) // 2
-
-
-def _band_mask(rows: Sequence[LabelLine], frame_width: int, band_pixels: int) -> np.ndarray:
-    """Render every row's text into one 8-bit coverage mask of the whole band.
+def _band_mask(lines: Sequence[LabelLine], frame_width: int, band_pixels: int) -> np.ndarray:
+    """Render every line of the band into one 8-bit coverage mask.
 
     Drawing through a mask keeps the antialiased edges while staying agnostic
     to the frame's channel count. Each text is centered on its drawn pixels
@@ -154,7 +162,7 @@ def _band_mask(rows: Sequence[LabelLine], frame_width: int, band_pixels: int) ->
     pushed visually upwards.
 
     Args:
-        rows: Rows to draw, in order.
+        lines: Lines to draw, top to bottom.
         frame_width: Band width in pixels.
         band_pixels: Total band height in pixels.
 
@@ -164,27 +172,29 @@ def _band_mask(rows: Sequence[LabelLine], frame_width: int, band_pixels: int) ->
     mask = Image.new("L", (frame_width, band_pixels), 0)
     draw = ImageDraw.Draw(mask)
 
-    row_top = 0
-    for index, row in enumerate(rows):
-        if row.text.strip():
-            font = _fitted_font(row.text, row.height, frame_width)
-            left, top, right, bottom = _ink_box(row.text, font)
+    slot_top = round(lines[0].size * BAND_PAD_RATIO)
+    for index, line in enumerate(lines):
+        slot = _slot_height(line.size)
+        if line.text.strip():
+            font = _fitted_font(line.text, line.size, frame_width)
+            left, top, right, bottom = _ink_box(line.text, font)
             x = (frame_width - (right - left)) // 2 - left
-            y = row_top + _ink_top_in_row(rows, index, bottom - top) - top
-            draw.text((x, y), row.text, font=font, fill=255, anchor="lt")
-        row_top += row.height
+            y = slot_top + (slot - (bottom - top)) // 2 - top
+            draw.text((x, y), line.text, font=font, fill=255, anchor="lt")
+        slot_top += slot
+        if index + 1 < len(lines):
+            slot_top += round(line.size * LINE_GAP_RATIO)
 
     return np.asarray(mask)
 
 
-def _render_band(frame: np.ndarray, rows: Sequence[LabelLine]) -> np.ndarray:
+def _render_band(frame: np.ndarray, lines: Sequence[LabelLine], band_pixels: int) -> np.ndarray:
     """Render the whole band, matching the frame's dtype and channel count."""
     frame_width = frame.shape[1]
-    band_pixels = sum(row.height for row in rows)
     band = np.full((band_pixels, *frame.shape[1:]), BAND_COLOR, dtype=frame.dtype)
 
-    if frame_width > 0 and any(row.text.strip() for row in rows):
-        coverage = _band_mask(rows, frame_width, band_pixels) / 255.0
+    if frame_width > 0 and any(line.text.strip() for line in lines):
+        coverage = _band_mask(lines, frame_width, band_pixels) / 255.0
         if band.ndim == 3:
             coverage = coverage[..., np.newaxis]
         blended = coverage * LABEL_COLOR + (1.0 - coverage) * BAND_COLOR
@@ -194,26 +204,27 @@ def _render_band(frame: np.ndarray, rows: Sequence[LabelLine]) -> np.ndarray:
 
 
 def append_label_band(frame: np.ndarray, lines: Sequence[LabelLine]) -> np.ndarray:
-    """Append a black band of text rows under `frame`.
+    """Append a black band of text lines under `frame`.
 
-    Rows are stacked top to bottom in the order given, each text centered
-    horizontally and sized from its own row's height. A row with a neighbour
-    sits close to it, so a label and its second line read as one caption.
+    Lines are stacked top to bottom in the order given, each centered
+    horizontally and drawn at its own size, with the same padding above the
+    first line as below the last.
 
     Args:
         frame: Cropped frame, any dtype and channel count; it is left untouched.
-        lines: Rows to draw; a row with an empty text yields a uniform row, and
-            a row with a non-positive height is skipped.
+        lines: Lines to draw; an empty text still takes its place, and a line
+            with a non-positive size is skipped.
 
     Returns:
-        A new frame grown by the total height of the rows, or `frame` itself
-        when no row has a positive height.
+        A new frame grown by the band height, or `frame` itself when no line
+        has a positive size.
 
     Raises:
         LabelFontError: If the bundled font cannot be read.
     """
-    rows = [line for line in lines if line.height > 0]
-    if not rows:
+    drawn = [line for line in lines if line.size > 0]
+    band_pixels = band_height(drawn)
+    if not band_pixels:
         return frame
 
-    return np.vstack((frame, _render_band(frame, rows)))
+    return np.vstack((frame, _render_band(frame, drawn, band_pixels)))

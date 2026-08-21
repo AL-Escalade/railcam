@@ -33,11 +33,12 @@ from railcam.cropping import (
 )
 from railcam.frame_source import FrameSource
 from railcam.labeling import (
-    LABEL_BAND_RATIO,
-    SUBLABEL_BAND_RATIO,
+    LABEL_FONT_RATIO,
+    SUBLABEL_FONT_RATIO,
     LabelLine,
     append_label_band,
     band_height,
+    font_size,
 )
 from railcam.multi_video import (
     InputParseError,
@@ -580,7 +581,7 @@ class CropPlan:
     @property
     def frame_height(self) -> int:
         """Height of an emitted frame before scaling: image plus label band."""
-        return self.output_height + sum(line.height for line in self.label_lines)
+        return self.output_height + band_height(self.label_lines)
 
     @property
     def final_size(self) -> tuple[int, int]:
@@ -666,7 +667,7 @@ def print_crop_plan(plan: CropPlan, analysis: VideoAnalysisResult, target_ratio:
     if plan.label_lines:
         band = plan.frame_height - plan.output_height
         print(
-            f"  Label band: {band}px over {len(plan.label_lines)} row(s) "
+            f"  Label band: {band}px over {len(plan.label_lines)} line(s) "
             f"(frame {plan.output_width}x{plan.frame_height})"
         )
     if plan.needs_padding:
@@ -793,7 +794,7 @@ class VideoStream:
 
 
 def _band_row_ratios(video_inputs: Sequence[VideoInput]) -> list[float]:
-    """Row heights of the label band, as fractions of the image height.
+    """Text sizes of the label band, as fractions of the image height.
 
     The layout belongs to the render, not to a single video: composition
     normalizes heights by scaling, so a video left without a row would have its
@@ -806,28 +807,28 @@ def _band_row_ratios(video_inputs: Sequence[VideoInput]) -> list[float]:
         One ratio per row, top to bottom; empty when no video has any text.
     """
     if any(v.sublabel for v in video_inputs):
-        return [LABEL_BAND_RATIO, SUBLABEL_BAND_RATIO]
+        return [LABEL_FONT_RATIO, SUBLABEL_FONT_RATIO]
     if any(v.label for v in video_inputs):
-        return [LABEL_BAND_RATIO]
+        return [LABEL_FONT_RATIO]
     return []
 
 
 def _label_lines(
     video_input: VideoInput, image_height: int, ratios: Sequence[float]
 ) -> tuple[LabelLine, ...]:
-    """Build this video's band rows for the render's row layout.
+    """Build this video's band lines for the render's line layout.
 
     Args:
         video_input: Video whose texts fill the rows.
         image_height: Height of the cropped image the band sits under.
-        ratios: Row height ratios shared by every video of the render.
+        ratios: Text size ratios shared by every video of the render.
 
     Returns:
-        The rows, with an empty text where this video has none.
+        The lines, with an empty text where this video has none.
     """
     texts = (video_input.label, video_input.sublabel)
     return tuple(
-        LabelLine(text, band_height(image_height, ratio)) for text, ratio in zip(texts, ratios)
+        LabelLine(text, font_size(image_height, ratio)) for text, ratio in zip(texts, ratios)
     )
 
 

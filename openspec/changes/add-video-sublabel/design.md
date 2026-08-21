@@ -22,7 +22,15 @@ as any input has a sublabel, every input gets the second row, empty or not.
 
 ## Sizes
 
-The second row is `SUBLABEL_BAND_RATIO` (0.05) of the image height against 0.08
-for the first. Both draw their text at the same fraction of their own row, so
-the second line lands at roughly 60% of the first — clearly secondary, still
+`LABEL_FONT_RATIO` (0.04) and `SUBLABEL_FONT_RATIO` (0.021) of the image height
+size the two lines, so the second reads as clearly secondary while staying
 legible on a phone.
+
+The band is measured from its text rather than the text fitted into a fixed
+band: padding above the first line and below the last (`BAND_PAD_RATIO`) and a
+gap between lines (`LINE_GAP_RATIO`), both expressed against the line size they
+sit next to. That is what makes the space above the label equal to the space
+below the last line — with lines centered in fixed boxes it was not, and could
+only be made so with opaque constants. The line's slot is measured from a
+reference glyph rather than from the text itself, so the band height does not
+depend on the words and two composed videos keep matching bands.

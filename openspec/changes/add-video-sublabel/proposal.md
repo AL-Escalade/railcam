@@ -15,9 +15,10 @@ and they deserve different weight.
   order they are given, exactly like `--label`.
 - Expose it as a second per-video field in the GUI, persisted in project files
   and reflected in the displayed CLI command.
-- Generalize the band to a stack of rows: each row carries its own text and
-  height, and its font follows its height. The second row is 5% of the image
-  height against 8% for the first, so its text lands around 60% of the size.
+- Generalize the band to a stack of lines: each line carries its own text and
+  size, and the band height follows from those sizes plus an explicit padding,
+  the same above the first line as below the last. The second line is 2.1% of
+  the image height against 4% for the first, so it reads as clearly secondary.
 
 ## Impact
 

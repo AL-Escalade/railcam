@@ -8,10 +8,11 @@ import pytest
 from railcam import cli
 from railcam.cli import create_parser
 from railcam.labeling import (
-    LABEL_BAND_RATIO,
-    SUBLABEL_BAND_RATIO,
+    LABEL_FONT_RATIO,
+    SUBLABEL_FONT_RATIO,
     LabelLine,
     band_height,
+    font_size,
 )
 from railcam.pose import DetectionResult, PelvisPosition, TorsoMeasurement
 from railcam.processing import ProcessedPosition
@@ -385,7 +386,7 @@ class TestLabelBandPlanning:
 
         plan = streams[0].plan
         assert plan.label_lines == (
-            LabelLine("Dupont", band_height(plan.output_height, LABEL_BAND_RATIO)),
+            LabelLine("Dupont", font_size(plan.output_height, LABEL_FONT_RATIO)),
         )
 
     def test_no_sublabel_keeps_the_single_row_geometry(self, monkeypatch, capsys) -> None:
@@ -397,9 +398,7 @@ class TestLabelBandPlanning:
 
         plan = streams[0].plan
         assert len(plan.label_lines) == 1
-        assert plan.frame_height == plan.output_height + band_height(
-            plan.output_height, LABEL_BAND_RATIO
-        )
+        assert plan.frame_height == plan.output_height + band_height(plan.label_lines)
 
     def test_one_sublabel_gives_every_video_two_rows(self, monkeypatch, capsys) -> None:
         streams = self._plan_videos(
@@ -421,8 +420,9 @@ class TestLabelBandPlanning:
             ["Zhao", "4.704"],
             ["Dupont", ""],
         ]
-        heights = [[line.height for line in s.plan.label_lines] for s in streams]
-        assert heights[0] == heights[1]
+        sizes = [[line.size for line in s.plan.label_lines] for s in streams]
+        assert sizes[0] == sizes[1]
+        assert streams[0].plan.frame_height == streams[1].plan.frame_height
 
     def test_second_row_is_shorter_and_matches_its_module_ratio(self, monkeypatch, capsys) -> None:
         streams = self._plan_videos(
@@ -440,8 +440,8 @@ class TestLabelBandPlanning:
         )
 
         plan = streams[0].plan
-        assert plan.label_lines[1].height == band_height(plan.output_height, SUBLABEL_BAND_RATIO)
-        assert plan.label_lines[1].height < plan.label_lines[0].height
+        assert plan.label_lines[1].size == font_size(plan.output_height, SUBLABEL_FONT_RATIO)
+        assert plan.label_lines[1].size < plan.label_lines[0].size
 
     def test_sublabel_without_a_label_leaves_the_first_row_empty(self, monkeypatch, capsys) -> None:
         streams = self._plan_videos(
@@ -453,8 +453,8 @@ class TestLabelBandPlanning:
         plan = streams[0].plan
         lines = plan.label_lines
         assert [line.text for line in lines] == ["", "4.704"]
-        assert all(line.height > 0 for line in lines)
-        assert plan.frame_height == plan.output_height + sum(line.height for line in lines)
+        assert all(line.size > 0 for line in lines)
+        assert plan.frame_height == plan.output_height + band_height(lines)
 
 
 class TestLabelBandRendering:
@@ -465,28 +465,32 @@ class TestLabelBandRendering:
         return cli._crop_one_frame(plan, source, plan.positions[0], None)
 
     def test_cropped_frame_is_taller_by_the_band_height(self) -> None:
+        lines = (LabelLine("Dupont", 12),)
         plain = self._frame(_plan(1, 30.0))
-        labeled = self._frame(_plan(1, 30.0, (LabelLine("Dupont", 6),)))
+        labeled = self._frame(_plan(1, 30.0, lines))
 
-        assert labeled.shape[0] == plain.shape[0] + 6
+        assert labeled.shape[0] == plain.shape[0] + band_height(lines)
         assert labeled.shape[1] == plain.shape[1]
 
-    def test_cropped_frame_is_taller_by_the_sum_of_the_rows(self) -> None:
-        plain = self._frame(_plan(1, 30.0))
-        labeled = self._frame(_plan(1, 30.0, (LabelLine("Zhao", 8), LabelLine("4.704", 4))))
+    def test_second_line_makes_the_band_taller(self) -> None:
+        one_line = self._frame(_plan(1, 30.0, (LabelLine("Zhao", 12),)))
+        two_lines = self._frame(_plan(1, 30.0, (LabelLine("Zhao", 12), LabelLine("4.704", 7))))
 
-        assert labeled.shape[0] == plain.shape[0] + 12
+        assert two_lines.shape[0] > one_line.shape[0]
 
-    def test_second_row_is_drawn_under_the_first(self) -> None:
-        plan = _plan(1, 30.0, (LabelLine("Zhao", 8), LabelLine("4.704", 4)))
+    def test_second_line_is_drawn_under_the_first(self) -> None:
+        both = _plan(1, 30.0, (LabelLine("Zhao", 12), LabelLine("4.704", 7)))
+        first_only = _plan(1, 30.0, (LabelLine("Zhao", 12), LabelLine("", 7)))
 
-        band = self._frame(plan)[plan.output_height :]
-        drawn = np.where(band.max(axis=(1, 2)) > 0)[0]
+        drawn = np.where(self._frame(both)[both.output_height :].max(axis=(1, 2)) > 0)[0]
+        first = np.where(self._frame(first_only)[first_only.output_height :].max(axis=(1, 2)) > 0)[
+            0
+        ]
 
-        assert drawn.min() < 8 <= drawn.max()
+        assert drawn.max() > first.max()
 
     def test_image_above_the_band_is_untouched(self) -> None:
-        plan = _plan(1, 30.0, (LabelLine("Dupont", 6),))
+        plan = _plan(1, 30.0, (LabelLine("Dupont", 12),))
 
         labeled = self._frame(plan)
 
@@ -494,7 +498,7 @@ class TestLabelBandRendering:
 
     def test_band_is_drawn_before_the_output_scaling(self) -> None:
         """The band keeps its proportion of the output height at any size."""
-        plan = _plan(1, 30.0, (LabelLine("Dupont", 6),))
+        plan = _plan(1, 30.0, (LabelLine("Dupont", 12),))
         plan.target_height = plan.frame_height * 2
 
         scaled = self._frame(plan)
@@ -502,7 +506,7 @@ class TestLabelBandRendering:
         assert scaled.shape[0] == plan.frame_height * 2
 
     def test_single_video_output_size_includes_the_band(self, capsys) -> None:
-        plan = _plan(3, 30.0, (LabelLine("Dupont", 6),))
+        plan = _plan(3, 30.0, (LabelLine("Dupont", 12),))
 
         output = cli.build_output_stream([_stream(plan)])
         capsys.readouterr()
@@ -511,8 +515,8 @@ class TestLabelBandRendering:
 
     def test_composition_row_height_follows_the_frame_height(self, capsys) -> None:
         plans = [
-            _plan(3, 30.0, (LabelLine("Dupont", 6), LabelLine("4.704", 4))),
-            _plan(3, 30.0, (LabelLine("", 6), LabelLine("", 4))),
+            _plan(3, 30.0, (LabelLine("Dupont", 12), LabelLine("4.704", 7))),
+            _plan(3, 30.0, (LabelLine("", 12), LabelLine("", 7))),
         ]
 
         output = cli.build_output_stream([_stream(p) for p in plans])
