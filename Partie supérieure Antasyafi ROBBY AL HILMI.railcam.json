@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "videos": [
+    {
+      "path": "../../../Downloads/Vitesse/F2M - Antasyafi ROBBY AL HILMI 4.72 - Ryo OMASA 5.97.MOV",
+      "start_frame": 210,
+      "end_frame": 273,
+      "climber": "left",
+      "label": "Partie sup\u00e9rieure - 2 mains M11 vers chinoise",
+      "sublabel": "Antasyafi ROBBY AL HILMI - 4.72"
+    }
+  ],
+  "render": {
+    "format": "mp4",
+    "height": null,
+    "speed": 0.25,
+    "debug": false,
+    "model": "s",
+    "imgsz": null
+  },
+  "output_path": "/Users/ghusse/Downloads/Vitesse/Sections/Partie sup\u00e9rieure Antasyafi ROBBY AL HILMI.mp4"
+}

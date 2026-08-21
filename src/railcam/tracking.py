@@ -214,29 +214,32 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
 
 
 def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None:
-    """Choose the climber's track: selectors apply among climbing tracks.
+    """Choose the climber's track: selectors apply among the climbing ones.
 
-    Tracks below the climbing displacement threshold (static bystanders) are
-    excluded, as are those found on far fewer frames than the best candidate --
-    a pose model reporting a hold as a person. If none qualifies, all tracks
-    are considered as a fallback.
+    Tracks that barely move next to the best one (static bystanders) are
+    excluded, as are those found on far fewer frames than it -- a pose model
+    reporting a hold as a person. Both cuts are relative, so they still hold
+    on a section where nobody clears the absolute climbing threshold.
     """
     if not tracks:
         return None
 
-    climbing = [track for track in tracks if track.climb_rise >= MIN_CLIMB_SPAN]
-    if climbing:
-        best_rise = max(track.climb_rise for track in climbing)
-        climbing = [
-            track for track in climbing if track.climb_rise >= MIN_RELATIVE_SPAN * best_rise
-        ]
-        best_coverage = max(len(track.detections) for track in climbing)
-        climbing = [
-            track
-            for track in climbing
-            if len(track.detections) >= MIN_RELATIVE_COVERAGE * best_coverage
-        ]
-    candidates = climbing or tracks
+    # The absolute threshold only picks the pool: a short section near the top
+    # of the wall can leave every track below it, and the run still has a
+    # climber. The relative cuts then apply either way, so a bystander or a
+    # hold never wins by default.
+    candidates = [track for track in tracks if track.climb_rise >= MIN_CLIMB_SPAN] or tracks
+
+    best_rise = max(track.climb_rise for track in candidates)
+    candidates = [
+        track for track in candidates if track.climb_rise >= MIN_RELATIVE_SPAN * best_rise
+    ]
+    best_coverage = max(len(track.detections) for track in candidates)
+    candidates = [
+        track
+        for track in candidates
+        if len(track.detections) >= MIN_RELATIVE_COVERAGE * best_coverage
+    ]
 
     if selector == ClimberSelector.LEFT:
         return min(candidates, key=lambda track: track.mean_x)

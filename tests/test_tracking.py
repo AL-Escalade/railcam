@@ -11,6 +11,7 @@ from railcam.pose import (
     PersonDetection,
 )
 from railcam.tracking import (
+    MIN_CLIMB_SPAN,
     _allowed_jump,
     build_tracks,
     repair_track_gaps,
@@ -462,3 +463,23 @@ def test_selection_keeps_a_climber_detected_on_half_the_frames() -> None:
     other = make_track({f: (0.68, 0.80 - 0.005 * f) for f in range(40)})
 
     assert select_track([sparse, other], ClimberSelector.LEFT) is sparse
+
+
+def test_selection_holds_on_a_section_where_nobody_climbs_far() -> None:
+    """A short section near the top: nobody clears the absolute rise threshold.
+
+    Frames 289-382 of a phone-filmed final. Falling back to every track let the
+    leftmost one win, and that was a hold detected on six frames.
+    """
+    climber = make_track({f: (0.25, 0.50 - 0.0008 * f) for f in range(90)})
+    hold = make_track(dict.fromkeys(range(6), (0.19, 0.62)))
+
+    assert max(climber.climb_rise, hold.climb_rise) < MIN_CLIMB_SPAN
+    assert select_track([climber, hold], ClimberSelector.LEFT) is climber
+
+
+def test_a_still_bystander_never_wins_by_default() -> None:
+    climber = make_track({f: (0.60, 0.50 - 0.0008 * f) for f in range(90)})
+    bystander = make_track(dict.fromkeys(range(90), (0.20, 0.90)))
+
+    assert select_track([climber, bystander], ClimberSelector.LEFT) is climber
