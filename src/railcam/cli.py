@@ -47,11 +47,13 @@ from railcam.output import (
 )
 from railcam.pose import (
     DEFAULT_MODEL_SIZE,
-    HIGH_RES_IMGSZ,
+    MAX_IMGSZ,
+    MIN_IMGSZ,
     MODEL_SIZES,
     ClimberSelector,
     DetectionResult,
     MultiPersonDetectionResult,
+    PersonDetection,
     PoseDetector,
     draw_pose_overlay_on_crop,
 )
@@ -219,6 +221,13 @@ Examples:
         "several times slower; missed frames are repaired at high resolution regardless.",
     )
     parser.add_argument(
+        "--imgsz",
+        type=int,
+        help="Detection resolution in pixels. Default: half the source's largest side, "
+        f"clamped to [{MIN_IMGSZ}, {MAX_IMGSZ}]. Raise it when climbers are small in a "
+        "wide shot, lower it for a faster run.",
+    )
+    parser.add_argument(
         "-v",
         "--version",
         action="version",
@@ -360,6 +369,14 @@ class _PoseDetectionResult:
     torso_heights: list[float]
 
 
+def _detect_for_repair(
+    detector: PoseDetector, source: FrameSource, frame_num: int
+) -> list[PersonDetection]:
+    """Detect persons on one frame at the repair resolution."""
+    frame = source.get_frame(frame_num)
+    return detector.detect_all_persons(frame, frame_num, imgsz=detector.repair_size(frame)).persons
+
+
 def _detect_poses_with_tracking(
     video_input: VideoInput,
     detector: PoseDetector,
@@ -407,11 +424,7 @@ def _detect_poses_with_tracking(
                 repaired = repair_track_gaps(
                     selected,
                     frame_nums,
-                    lambda f: (
-                        detector.detect_all_persons(
-                            source.get_frame(f), f, imgsz=HIGH_RES_IMGSZ
-                        ).persons
-                    ),
+                    lambda f: _detect_for_repair(detector, source, f),
                     avoid=[track for track in tracks if track is not selected],
                 )
             print(f"  Recovered {repaired}/{missing} frame(s)")
@@ -453,6 +466,8 @@ def analyze_video(
         print(f"  Climber selection: {video_input.climber_selector.value}")
 
     # Pose detection with multi-person support
+    probe = np.zeros((metadata.height, metadata.width, 3), dtype=np.uint8)
+    print(f"  Detection resolution: {detector.inference_size(probe)}px")
     print("  Detecting poses...")
     pose_result = _detect_poses_with_tracking(video_input, detector, frame_count)
 
@@ -909,6 +924,10 @@ def main(argv: list[str] | None = None) -> int:
         print("Error: Speed must be a positive number.", file=sys.stderr)
         return 1
 
+    if args.imgsz is not None and args.imgsz < MIN_IMGSZ:
+        print(f"Error: --imgsz must be at least {MIN_IMGSZ}.", file=sys.stderr)
+        return 1
+
     # Parse and validate inputs
     video_inputs = validate_args(args)
     is_multi_video = len(video_inputs) > 1
@@ -917,7 +936,7 @@ def main(argv: list[str] | None = None) -> int:
         # Analyze and plan every video; no frames are retained
         print(f"Processing {len(video_inputs)} video(s)...")
 
-        with PoseDetector(model_size=args.model) as detector:
+        with PoseDetector(model_size=args.model, imgsz=args.imgsz) as detector:
             streams = plan_videos(
                 video_inputs,
                 detector,

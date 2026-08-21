@@ -380,3 +380,21 @@ class TestLabelBandRendering:
         capsys.readouterr()
 
         assert output.height == max(p.frame_height for p in plans)
+
+
+class TestImgszOption:
+    """The detection resolution is auto by default and overridable."""
+
+    def test_absent_by_default(self) -> None:
+        args = create_parser().parse_args(["video.mp4", "0", "10"])
+
+        assert args.imgsz is None
+
+    def test_parsed_value(self) -> None:
+        args = create_parser().parse_args(["video.mp4", "0", "10", "--imgsz", "1920"])
+
+        assert args.imgsz == 1920
+
+    def test_below_the_minimum_is_rejected(self, capsys) -> None:
+        assert cli.main(["video.mp4", "0", "10", "--imgsz", "320"]) == 1
+        assert "--imgsz" in capsys.readouterr().err

@@ -30,7 +30,7 @@ from railcam.gui.progress import (
     parse_progress,
     split_output_chunks,
 )
-from railcam.gui.project import MODEL_LABELS, Project, RenderOptions
+from railcam.gui.project import MIN_IMGSZ, MODEL_LABELS, Project, RenderOptions
 from railcam.gui.render import build_cli_args, format_cli_command, resolve_railcam_command
 
 
@@ -143,6 +143,22 @@ class RenderPanel(QWidget):
         options_row.addWidget(self.model_combo)
 
         options_row.addSpacing(10)
+        options_row.addWidget(QLabel("Résolution :"))
+        self.imgsz_spin = QSpinBox()
+        self.imgsz_spin.setRange(0, 4096)
+        self.imgsz_spin.setSpecialValueText("auto")
+        self.imgsz_spin.setSingleStep(320)
+        self.imgsz_spin.setToolTip(
+            "Résolution de détection. En auto elle suit la source (moitié du plus grand "
+            "côté) : monter aide quand les grimpeurs sont petits dans un plan large, "
+            "descendre accélère le rendu."
+        )
+        # 0 means auto; anything the CLI would reject snaps up rather than
+        # being silently dropped when the options are read back
+        self.imgsz_spin.valueChanged.connect(self._snap_imgsz)
+        options_row.addWidget(self.imgsz_spin)
+
+        options_row.addSpacing(10)
         self.debug_check = QCheckBox("Debug (squelette)")
         options_row.addWidget(self.debug_check)
 
@@ -162,6 +178,7 @@ class RenderPanel(QWidget):
             self.height_spin.valueChanged,
             self.speed_spin.valueChanged,
             self.model_combo.currentIndexChanged,
+            self.imgsz_spin.valueChanged,
             self.debug_check.toggled,
             self.output_edit.textChanged,
         ):
@@ -220,13 +237,19 @@ class RenderPanel(QWidget):
 
     def render_options(self) -> RenderOptions:
         height = self.height_spin.value()
+        imgsz = self.imgsz_spin.value()
         return RenderOptions(
             format=self.format_combo.currentText(),
             height=height if height > 0 else None,
             speed=round(self.speed_spin.value(), 4),
             debug=self.debug_check.isChecked(),
             model=str(self.model_combo.currentData()),
+            imgsz=imgsz or None,
         )
+
+    def _snap_imgsz(self, value: int) -> None:
+        if 0 < value < MIN_IMGSZ:
+            self.imgsz_spin.setValue(MIN_IMGSZ)
 
     def output_path(self, project: Project) -> Path | None:
         text = self.output_edit.text().strip()
@@ -245,6 +268,7 @@ class RenderPanel(QWidget):
         model_index = self.model_combo.findData(options.model)
         if model_index >= 0:
             self.model_combo.setCurrentIndex(model_index)
+        self.imgsz_spin.setValue(options.imgsz or 0)
         self.debug_check.setChecked(options.debug)
         self.output_edit.setText(str(output_path) if output_path else "")
 

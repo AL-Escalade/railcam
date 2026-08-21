@@ -169,3 +169,62 @@ class TestDetectPelvis:
         detector = _detector_returning(monkeypatch, [_FakeResult(None)])
 
         assert detector.detect_pelvis(FRAME, frame_num=0).position is None
+
+
+def _frame(width: int, height: int) -> np.ndarray:
+    return np.zeros((height, width, 3), dtype=np.uint8)
+
+
+class TestInferenceResolution:
+    """The resolution follows the source: a fixed size loses 4K climbers."""
+
+    def test_scales_with_the_largest_side(self) -> None:
+        assert pose.auto_imgsz(2160, 3840) == 1920
+        assert pose.auto_imgsz(2560, 1440) == 1280
+
+    def test_stays_within_bounds(self) -> None:
+        assert pose.auto_imgsz(320, 240) == pose.MIN_IMGSZ
+        assert pose.auto_imgsz(7680, 4320) == pose.MAX_IMGSZ
+
+    def test_is_a_multiple_of_the_stride(self) -> None:
+        for side in range(640, 5000, 137):
+            assert pose.auto_imgsz(side, side) % pose.IMGSZ_MULTIPLE == 0
+
+    def test_detector_uses_the_auto_size(self, monkeypatch) -> None:
+        _record_loaded_weights(monkeypatch)
+        detector = pose.PoseDetector()
+
+        assert detector.inference_size(_frame(2160, 3840)) == 1920
+
+    def test_explicit_size_overrides_the_source(self, monkeypatch) -> None:
+        _record_loaded_weights(monkeypatch)
+        detector = pose.PoseDetector(imgsz=960)
+
+        assert detector.inference_size(_frame(2160, 3840)) == 960
+
+    def test_repair_looks_closer_than_the_main_pass(self, monkeypatch) -> None:
+        _record_loaded_weights(monkeypatch)
+        detector = pose.PoseDetector()
+        frame = _frame(1280, 720)
+
+        assert detector.repair_size(frame) == detector.inference_size(frame) * 2
+
+    def test_repair_is_capped(self, monkeypatch) -> None:
+        _record_loaded_weights(monkeypatch)
+        detector = pose.PoseDetector()
+
+        assert detector.repair_size(_frame(2160, 3840)) == pose.MAX_REPAIR_IMGSZ
+
+    def test_inference_size_reaches_the_model(self, monkeypatch) -> None:
+        _record_loaded_weights(monkeypatch)
+        detector = pose.PoseDetector()
+        calls: list[int] = []
+
+        def fake_model(frame, imgsz, verbose):
+            calls.append(imgsz)
+            return []
+
+        monkeypatch.setattr(detector, "_model", fake_model)
+        detector.detect_all_persons(_frame(2160, 3840), 0)
+
+        assert calls == [1920]

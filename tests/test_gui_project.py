@@ -239,3 +239,30 @@ def test_load_rejects_non_string_label(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectError, match="label"):
         Project.load(project_file)
+
+
+class TestDetectionResolution:
+    def test_round_trip(self, tmp_path) -> None:
+        target = tmp_path / "session.railcam.json"
+        Project(videos=[], render=RenderOptions(imgsz=1920)).save(target)
+
+        assert Project.load(target).render.imgsz == 1920
+
+    def test_absent_field_means_auto(self, tmp_path) -> None:
+        target = tmp_path / "old.railcam.json"
+        target.write_text(
+            json.dumps({"version": 1, "videos": [], "render": {"model": "s"}}),
+            encoding="utf-8",
+        )
+
+        assert Project.load(target).render.imgsz is None
+
+    def test_below_the_minimum_is_rejected(self, tmp_path) -> None:
+        target = tmp_path / "bad.railcam.json"
+        target.write_text(
+            json.dumps({"version": 1, "videos": [], "render": {"imgsz": 128}}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ProjectError):
+            Project.load(target)

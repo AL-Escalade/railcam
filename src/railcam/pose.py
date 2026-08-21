@@ -23,9 +23,37 @@ class ClimberSelector(Enum):
 # Confidence threshold for hip visibility
 CONFIDENCE_THRESHOLD = 0.3
 
-# Inference resolution for the targeted gap-repair pass: detects small or
-# crouched climbers on 4K footage that the default resolution misses.
-HIGH_RES_IMGSZ = 1280
+# Inference resolution bounds. The detector downscales every frame to a square
+# of this side, so a fixed size makes a climber on a 15 m wall shrink with the
+# source resolution: at 640 the two climbers of a 4K wide shot are ~40 px tall
+# and go undetected, which no error reports -- the run simply tracks whoever
+# was still found. The size therefore follows the source, halving it within
+# these bounds, and stays a multiple of the model's stride.
+MIN_IMGSZ = 640
+MAX_IMGSZ = 1920
+IMGSZ_MULTIPLE = 32
+SOURCE_IMGSZ_RATIO = 0.5
+
+# The targeted gap-repair pass runs on the few frames the selected track is
+# missing, so it can afford to look closer than the main pass.
+REPAIR_IMGSZ_SCALE = 2
+MAX_REPAIR_IMGSZ = 2560
+
+
+def auto_imgsz(width: int, height: int) -> int:
+    """Pick the inference resolution for a frame of the given size.
+
+    Args:
+        width: Frame width in pixels.
+        height: Frame height in pixels.
+
+    Returns:
+        A multiple of the model stride within [MIN_IMGSZ, MAX_IMGSZ].
+    """
+    target = max(width, height) * SOURCE_IMGSZ_RATIO
+    rounded = round(target / IMGSZ_MULTIPLE) * IMGSZ_MULTIPLE
+    return int(min(max(rounded, MIN_IMGSZ), MAX_IMGSZ))
+
 
 # YOLOv8-pose model sizes, from fastest to most accurate.
 MODEL_SIZES = ("n", "s", "m", "l", "x")
@@ -125,8 +153,11 @@ class PoseDetector:
         self,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
         model_size: str = DEFAULT_MODEL_SIZE,
+        imgsz: int | None = None,
     ) -> None:
         self.confidence_threshold = confidence_threshold
+        # None means the resolution follows each frame's size
+        self.imgsz = imgsz
         # Load YOLOv8-pose model from stable cache directory (not current working dir)
         model_name = f"yolov8{model_size}-pose.pt"
         weights_dir = settings.get("weights_dir", "")
@@ -134,6 +165,17 @@ class PoseDetector:
         print(f"Loading YOLOv8-pose model ({model_name})...")
         self._model = YOLO(model_path)
         print("Model loaded.")
+
+    def inference_size(self, frame: np.ndarray) -> int:
+        """Inference resolution used for this frame: the override, or the auto size."""
+        if self.imgsz is not None:
+            return self.imgsz
+        height, width = frame.shape[:2]
+        return auto_imgsz(width, height)
+
+    def repair_size(self, frame: np.ndarray) -> int:
+        """Inference resolution for the gap-repair pass on this frame."""
+        return min(self.inference_size(frame) * REPAIR_IMGSZ_SCALE, MAX_REPAIR_IMGSZ)
 
     def _extract_person_from_keypoints(
         self,
@@ -290,10 +332,7 @@ class PoseDetector:
         Returns:
             One keypoints object per detected person; empty if none.
         """
-        if imgsz is not None:
-            results = self._model(frame, imgsz=imgsz, verbose=False)
-        else:
-            results = self._model(frame, verbose=False)
+        results = self._model(frame, imgsz=imgsz or self.inference_size(frame), verbose=False)
 
         result_list: list[Any] = list(results)
         if not result_list:
@@ -344,9 +383,8 @@ class PoseDetector:
         Args:
             frame: The video frame to analyze.
             frame_num: The frame number.
-            imgsz: Optional inference resolution override. Higher values
-                (e.g. HIGH_RES_IMGSZ) detect small/crouched persons on 4K
-                footage at the cost of slower inference.
+            imgsz: Inference resolution for this call. Defaults to the
+                detector's own resolution for a frame this size.
 
         Returns:
             MultiPersonDetectionResult with all detected persons.
@@ -354,7 +392,7 @@ class PoseDetector:
         height, width = frame.shape[:2]
 
         persons: list[PersonDetection] = []
-        for keypoints in self._person_keypoints(frame, imgsz):
+        for keypoints in self._person_keypoints(frame, imgsz or self.inference_size(frame)):
             person = self._extract_person_from_keypoints(keypoints, width, height)
             if person is not None:
                 persons.append(person)

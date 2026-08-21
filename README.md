@@ -197,6 +197,7 @@ Each input is processed independently, then composed horizontally.
 | `-H, --height PIXELS`                      | Output height           |
 | `-s, --speed FACTOR`                       | Playback speed          |
 | `--model {n,s,m,l,x}`                      | Detection model size    |
+| `--imgsz PIXELS`                           | Detection resolution    |
 | `--debug`                                  | Pose overlay            |
 | `-v, --version`                            | Show version            |
 | `-h, --help`                               | Show help               |
@@ -213,6 +214,21 @@ accuracy than the raw benchmark numbers suggest. Use `--model m` if the tracking
 wanders on difficult footage.
 
 The GUI exposes the same choice as **Détection** in the render options.
+
+#### Detection resolution
+
+Detection downscales every frame to a square before inference, so a fixed size
+makes the climbers shrink with the source resolution: on a 4K wide shot of a
+15 m wall they end up around 40 px tall and are simply not found — nothing
+fails, the run just tracks whoever was still detected.
+
+`--imgsz` therefore defaults to half the source's largest side, clamped to
+[640, 1920]: 1920 for 4K, 1280 for 1440p, 960 for 1080p, 640 below that. Raise
+it when climbers are small in a wide shot, lower it for a faster run. Frames the
+selected climber is missing are re-run at twice that size (capped at 2560).
+
+The GUI exposes it as **Résolution** in the render options, where `auto` means
+the source-derived default.
 
 #### Video labels
 

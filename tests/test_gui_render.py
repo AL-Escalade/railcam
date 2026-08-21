@@ -181,3 +181,16 @@ def test_built_args_are_parsed_back_as_labels_by_the_cli(label: str) -> None:
     inputs = validate_args(create_parser().parse_args(args))
 
     assert [video.label for video in inputs] == [label]
+
+
+class TestDetectionResolutionArgs:
+    def test_omitted_when_auto(self) -> None:
+        project = Project(videos=[], render=RenderOptions())
+
+        assert "--imgsz" not in build_cli_args(project)
+
+    def test_emitted_when_set(self) -> None:
+        project = Project(videos=[], render=RenderOptions(imgsz=1280))
+        args = build_cli_args(project)
+
+        assert args[args.index("--imgsz") + 1] == "1280"

@@ -75,10 +75,10 @@ dependency, not a choice.
 
 **Pass 1 — analyze** (`cli.py:analyze_video`), one video at a time:
 
-1. **Frame extraction** (`video.py`) - Stream the frame range with OpenCV, releasing each frame after use
-2. **Pose detection** (`pose.py`) - YOLOv8-pose detects all persons per frame
+1. **Frame extraction** (`video.py`) - Stream the frame range with OpenCV through `open_capture`, which applies the file's display rotation so frames arrive upright, releasing each frame after use
+2. **Pose detection** (`pose.py`) - YOLOv8-pose detects all persons per frame, at a resolution that follows the source (half its largest side, clamped to [640, 1920]) unless `--imgsz` overrides it
 3. **Track selection** (`tracking.py`) - Group detections into motion tracks, pick the climber by upward movement
-4. **Gap repair** (`frame_source.py`) - Re-read only the frames the selected track is missing, by index, and retry at 1280px
+4. **Gap repair** (`frame_source.py`) - Re-read only the frames the selected track is missing, by index, and retry at twice the detection resolution
 5. **Crop planning** (`cli.py:build_crop_plan`) - Interpolate and smooth positions, compute scale factor and output size. Pure: no pixels involved
 
 **Pass 2 — render**, driven lazily by the encoder pulling frames:

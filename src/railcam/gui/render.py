@@ -67,6 +67,8 @@ def build_cli_args(project: Project) -> list[str]:
         args.append("--debug")
     if render.model != defaults.model:
         args.extend(["--model", render.model])
+    if render.imgsz is not None:
+        args.extend(["--imgsz", str(render.imgsz)])
     if project.output_path is not None:
         args.extend(["-o", project.output_path.as_posix()])
     return args

@@ -21,6 +21,9 @@ VALID_CLIMBERS = ("auto", "left", "right")
 VALID_MODELS = ("n", "s", "m", "l", "x")
 DEFAULT_MODEL_SIZE = "s"
 
+# Mirrors railcam.pose.MIN_IMGSZ: the lowest resolution the CLI accepts.
+MIN_IMGSZ = 640
+
 # Labels for the model selector, naming both the trade-off and the CLI value.
 # The panel displays the equivalent CLI command, so a user who picks "Précis"
 # must be able to recognise the `--model m` they end up copying.
@@ -57,6 +60,7 @@ class RenderOptions:
     speed: float = 1.0
     debug: bool = False
     model: str = DEFAULT_MODEL_SIZE
+    imgsz: int | None = None
 
 
 @dataclass
@@ -88,6 +92,7 @@ class Project:
                 "speed": self.render.speed,
                 "debug": self.render.debug,
                 "model": self.render.model,
+                "imgsz": self.render.imgsz,
             },
             "output_path": str(self.output_path) if self.output_path is not None else None,
         }
@@ -178,12 +183,16 @@ def _load_render_options(data: dict[str, Any]) -> RenderOptions:
         raise ProjectError(f"Invalid model size: {model!r}. Valid values are {VALID_MODELS}.")
     try:
         height_raw = data.get("height", defaults.height)
+        imgsz_raw = data.get("imgsz", defaults.imgsz)
+        if imgsz_raw is not None and int(imgsz_raw) < MIN_IMGSZ:
+            raise ProjectError(f"Invalid detection resolution: {imgsz_raw!r} (min {MIN_IMGSZ}).")
         return RenderOptions(
             format=str(data.get("format", defaults.format)),
             height=int(height_raw) if height_raw is not None else None,
             speed=float(data.get("speed", defaults.speed)),
             debug=bool(data.get("debug", defaults.debug)),
             model=model,
+            imgsz=int(imgsz_raw) if imgsz_raw is not None else None,
         )
     except (TypeError, ValueError) as e:
         raise ProjectError(f"Invalid project file: bad render options ({e})") from e
