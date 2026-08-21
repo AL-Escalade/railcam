@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
 import cv2
 import numpy as np
@@ -295,7 +295,7 @@ class PoseDetector:
         else:
             results = self._model(frame, verbose=False)
 
-        result_list = cast("list[Any]", results)
+        result_list: list[Any] = list(results)
         if not result_list:
             return []
 
