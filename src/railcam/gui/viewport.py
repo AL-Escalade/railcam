@@ -7,6 +7,18 @@ the source frame to display, clamped to the frame bounds.
 
 from __future__ import annotations
 
+ZOOM_PER_NOTCH = 1.2
+_NOTCH_DELTA = 120.0  # angleDelta units Qt reports for one mouse-wheel detent
+
+
+def wheel_zoom_factor(angle_delta: float) -> float:
+    """Zoom factor for a wheel event of angle_delta eighths of a degree.
+
+    Following the delta instead of just its sign keeps a trackpad's stream of
+    small events as gradual as a single detent of a mouse wheel.
+    """
+    return float(ZOOM_PER_NOTCH ** (angle_delta / _NOTCH_DELTA))
+
 
 class Viewport:
     """Zoomable, pannable view over a frame of arbitrary size."""

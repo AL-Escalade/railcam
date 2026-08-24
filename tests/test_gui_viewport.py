@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from railcam.gui.viewport import Viewport
+from railcam.gui.viewport import ZOOM_PER_NOTCH, Viewport, wheel_zoom_factor
 
 W, H = 400.0, 300.0
 
@@ -84,3 +84,24 @@ def test_reset_returns_to_full_frame() -> None:
 
     assert viewport.visible_rect(W, H) == (0.0, 0.0, W, H)
     assert not viewport.is_zoomed
+
+
+class TestWheelZoomFactor:
+    """Turning wheel deltas into zoom factors."""
+
+    def test_one_detent_zooms_in_by_the_notch_step(self) -> None:
+        assert wheel_zoom_factor(120) == pytest.approx(ZOOM_PER_NOTCH)
+
+    def test_one_detent_backwards_undoes_one_forward(self) -> None:
+        assert wheel_zoom_factor(120) * wheel_zoom_factor(-120) == pytest.approx(1.0)
+
+    def test_a_no_delta_event_leaves_the_zoom_untouched(self) -> None:
+        assert wheel_zoom_factor(0) == pytest.approx(1.0)
+
+    def test_a_trackpad_gesture_totals_the_same_as_the_detents_it_adds_up_to(self) -> None:
+        viewport = Viewport()
+
+        for _ in range(24):  # 24 small events summing to two detents
+            viewport.zoom_at(wheel_zoom_factor(10), 0.5, 0.5)
+
+        assert viewport.zoom == pytest.approx(ZOOM_PER_NOTCH**2)

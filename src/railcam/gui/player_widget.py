@@ -23,7 +23,7 @@ from railcam.gui.frame_source import FrameSource
 from railcam.gui.imaging import frame_to_qimage
 from railcam.gui.project import VideoEntry, clamp_range
 from railcam.gui.timeline import TimelineWidget
-from railcam.gui.viewport import Viewport
+from railcam.gui.viewport import Viewport, wheel_zoom_factor
 
 _STEP_SMALL = 1
 _STEP_LARGE = 10
@@ -61,7 +61,12 @@ class FrameDisplay(QLabel):
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._pixmap is None:
             return
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+        delta = event.angleDelta().y()
+        # Trackpad gestures bracket their scroll with delta-less phase events:
+        # reading those as a direction would zoom out on every finger lift
+        if delta == 0:
+            return
+        factor = wheel_zoom_factor(delta)
         anchor = self._anchor_from(event.position())
         if anchor is not None:
             self.viewport_state.zoom_at(factor, *anchor)
