@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Vidéo illisible", str(error))
             return None
         player.removeRequested.connect(lambda p=player: self._remove_player(p))
+        player.replaceRequested.connect(lambda p=player: self._replace_player_video(p))
+        player.moveRequested.connect(lambda delta, p=player: self._move_player(p, delta))
         player.stateChanged.connect(self._on_state_changed)
         self._players_row.addWidget(player, stretch=1)
         self._empty_label.hide()
@@ -118,10 +120,39 @@ class MainWindow(QMainWindow):
             self._empty_label.show()
         self._on_state_changed()
 
+    def _move_player(self, player: PlayerWidget, delta: int) -> None:
+        """Move a player one slot left or right in the row."""
+        players = self.players()
+        target = players.index(player) + delta
+        if not 0 <= target < len(players):
+            return
+        # Taken before the removal shifts the indices, which is what makes the
+        # same insertion point work in both directions
+        anchor = self._players_row.indexOf(players[target])
+        self._players_row.removeWidget(player)
+        self._players_row.insertWidget(anchor, player, stretch=1)
+        player.setFocus()
+        self._on_state_changed()
+
+    def _replace_player_video(self, player: PlayerWidget) -> None:
+        """Swap the file behind a player, keeping its range, climber and labels."""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Remplacer la vidéo", str(player.source.path.parent), VIDEO_FILTER
+        )
+        if not file_name:
+            return
+        self.playback.forget(player)
+        try:
+            player.replace_source(Path(file_name))
+        except VideoError as error:
+            QMessageBox.warning(self, "Vidéo illisible", str(error))
+
     def _on_state_changed(self) -> None:
         """Refresh the CLI command display and render availability."""
         problems = []
         players = self.players()
+        for index, player in enumerate(players):
+            player.set_move_state(index > 0, index < len(players) - 1)
         if not players:
             problems.append("Ajoutez au moins une vidéo")
         problems.extend(

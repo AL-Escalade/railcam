@@ -40,6 +40,20 @@ class ProjectError(Exception):
     """Error loading or saving a project file."""
 
 
+def clamp_range(start: int, end: int, frame_count: int) -> tuple[int, int]:
+    """Fit a [start, end] frame range into a video of frame_count frames.
+
+    Keeps the selection when it still fits; falls back to the whole video when
+    clamping would leave nothing between the two bounds.
+    """
+    last = max(frame_count - 1, 0)
+    start = min(max(start, 0), last)
+    end = min(max(end, 0), last)
+    if end <= start:
+        return 0, last
+    return start, end
+
+
 @dataclass
 class VideoEntry:
     """One video in a session: source file, frame range, climber choice and labels."""

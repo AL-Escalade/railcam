@@ -14,6 +14,7 @@ from railcam.gui.project import (
     ProjectError,
     RenderOptions,
     VideoEntry,
+    clamp_range,
 )
 
 
@@ -328,3 +329,19 @@ def test_load_rejects_non_string_sublabel(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectError, match="sublabel"):
         Project.load(project_file)
+
+
+class TestClampRange:
+    """Fitting a selected frame range into a replacement video."""
+
+    def test_range_that_still_fits_is_kept(self) -> None:
+        assert clamp_range(100, 250, 400) == (100, 250)
+
+    def test_end_beyond_the_last_frame_is_pulled_back(self) -> None:
+        assert clamp_range(100, 250, 200) == (100, 199)
+
+    def test_range_entirely_past_the_end_falls_back_to_the_whole_video(self) -> None:
+        assert clamp_range(300, 400, 200) == (0, 199)
+
+    def test_single_frame_video_collapses_the_range(self) -> None:
+        assert clamp_range(5, 20, 1) == (0, 0)

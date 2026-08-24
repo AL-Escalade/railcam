@@ -30,6 +30,14 @@ class TimelineWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
+    def set_frame_count(self, frame_count: int) -> None:
+        """Rescale the timeline to a new video length, clamping what it shows."""
+        self._frame_count = max(frame_count, 1)
+        self._current = self._clamp(self._current)
+        self._start = self._clamp(self._start)
+        self._end = self._clamp(self._end)
+        self.update()
+
     def set_current_frame(self, frame: int) -> None:
         self._current = self._clamp(frame)
         self.update()

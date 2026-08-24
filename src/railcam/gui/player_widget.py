@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from railcam.gui.frame_source import FrameSource
 from railcam.gui.imaging import frame_to_qimage
-from railcam.gui.project import VideoEntry
+from railcam.gui.project import VideoEntry, clamp_range
 from railcam.gui.timeline import TimelineWidget
 from railcam.gui.viewport import Viewport
 
@@ -146,6 +146,8 @@ class PlayerWidget(QFrame):
 
     stateChanged = Signal()
     removeRequested = Signal()
+    replaceRequested = Signal()
+    moveRequested = Signal(int)  # -1 to move left, +1 to move right
 
     def __init__(self, path: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -156,29 +158,44 @@ class PlayerWidget(QFrame):
 
         self.setObjectName("playerCard")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._build_ui(path)
+        self._build_ui()
         self.display_frame(0)
 
     # --- UI construction -------------------------------------------------
 
-    def _build_ui(self, path: Path) -> None:
+    @staticmethod
+    def _header_button(text: str, tooltip: str) -> QToolButton:
+        button = QToolButton()
+        button.setText(text)
+        button.setToolTip(tooltip)
+        # Keep the arrow keys stepping frames instead of walking the header
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        return button
+
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(6)
 
         header = QHBoxLayout()
-        title = QLabel(path.name)
-        title.setObjectName("playerTitle")
-        meta = self.source.metadata
-        info = QLabel(f"{meta.width}×{meta.height} · {meta.fps:.4g} fps · {meta.total_frames} img")
-        info.setObjectName("playerMeta")
-        remove = QToolButton()
-        remove.setText("✕")
-        remove.setToolTip("Retirer cette vidéo")
+        self.move_left_button = self._header_button("«", "Déplacer cette vidéo vers la gauche")
+        self.move_left_button.clicked.connect(lambda: self.moveRequested.emit(-1))
+        self.move_right_button = self._header_button("»", "Déplacer cette vidéo vers la droite")
+        self.move_right_button.clicked.connect(lambda: self.moveRequested.emit(1))
+        self.title = QLabel()
+        self.title.setObjectName("playerTitle")
+        self.info = QLabel()
+        self.info.setObjectName("playerMeta")
+        replace = self._header_button("⇄", "Remplacer par un autre fichier")
+        replace.clicked.connect(self.replaceRequested.emit)
+        remove = self._header_button("✕", "Retirer cette vidéo")
         remove.clicked.connect(self.removeRequested.emit)
-        header.addWidget(title)
+        header.addWidget(self.move_left_button)
+        header.addWidget(self.move_right_button)
+        header.addWidget(self.title)
         header.addStretch()
-        header.addWidget(info)
+        header.addWidget(self.info)
+        header.addWidget(replace)
         header.addWidget(remove)
         layout.addLayout(header)
 
@@ -244,7 +261,20 @@ class PlayerWidget(QFrame):
         range_row.addWidget(self.climber_combo)
         layout.addLayout(range_row)
 
+        self._refresh_header()
         self._refresh_labels()
+
+    def _refresh_header(self) -> None:
+        meta = self.source.metadata
+        self.title.setText(meta.path.name)
+        self.info.setText(
+            f"{meta.width}×{meta.height} · {meta.fps:.4g} fps · {meta.total_frames} img"
+        )
+
+    def set_move_state(self, can_move_left: bool, can_move_right: bool) -> None:
+        """Enable the reorder buttons according to the player's position in the row."""
+        self.move_left_button.setEnabled(can_move_left)
+        self.move_right_button.setEnabled(can_move_right)
 
     # --- State -----------------------------------------------------------
 
@@ -282,6 +312,24 @@ class PlayerWidget(QFrame):
         self.timeline.set_range(self.start_frame, self.end_frame)
         self.display_frame(self.start_frame)
         self._refresh_labels()
+        self.stateChanged.emit()
+
+    def replace_source(self, path: Path) -> None:
+        """Swap the video file in place, keeping range, climber, labels and view.
+
+        Raises:
+            VideoError: If the new file cannot be read; the current one is kept.
+        """
+        source = FrameSource(path)
+        self.source.close()
+        self.source = source
+        self.start_frame, self.end_frame = clamp_range(
+            self.start_frame, self.end_frame, source.frame_count
+        )
+        self.timeline.set_frame_count(source.frame_count)
+        self.timeline.set_range(self.start_frame, self.end_frame)
+        self._refresh_header()
+        self.display_frame(self.start_frame)
         self.stateChanged.emit()
 
     def is_range_valid(self) -> bool:
