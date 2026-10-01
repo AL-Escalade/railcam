@@ -208,10 +208,10 @@ def _plan(decoded: int, fps: float, label_lines: tuple[LabelLine, ...] = ()) -> 
     )
 
 
-def _stream(plan: cli.CropPlan) -> cli.VideoStream:
+def _stream(plan: cli.CropPlan, slowmo: float = 1.0) -> cli.VideoStream:
     return cli.VideoStream(
         plan=plan,
-        video_input=cli.VideoInput(path=Path("v.mp4"), start_frame=0, end_frame=10),
+        video_input=cli.VideoInput(path=Path("v.mp4"), start_frame=0, end_frame=10, slowmo=slowmo),
         detections_by_frame={},
     )
 
@@ -236,6 +236,64 @@ class TestOutputDuration:
         capsys.readouterr()
 
         assert output.total_frames == 60
+
+
+class TestSlowmoSync:
+    """A slow-motion video is synchronized on its real capture rate."""
+
+    def test_slowmo_video_syncs_like_its_real_fps(self, capsys) -> None:
+        # 60 frames @30fps x2 slowmo = 60 frames @60fps real = 1.00s
+        slowmo = [_stream(_plan(60, 60.0)), _stream(_plan(60, 30.0), slowmo=2.0)]
+        real = [_stream(_plan(60, 60.0)), _stream(_plan(60, 60.0))]
+
+        slowmo_output = cli.build_output_stream(slowmo)
+        real_output = cli.build_output_stream(real)
+        capsys.readouterr()
+
+        assert slowmo_output.fps == real_output.fps == 60.0
+        assert slowmo_output.total_frames == real_output.total_frames == 60
+
+    def test_slowmo_shortens_the_real_duration(self, capsys) -> None:
+        # 60 @30fps normal = 2.00s; 60 @30fps x2 = 1.00s and freezes after it
+        streams = [_stream(_plan(60, 30.0)), _stream(_plan(60, 30.0), slowmo=2.0)]
+
+        output = cli.build_output_stream(streams)
+        printed = capsys.readouterr().out
+
+        # LCM(30, 60) = 60fps over the 2.00s of the normal video
+        assert output.fps == 60.0
+        assert output.total_frames == 120
+        assert "x2 slowmo" in printed
+        assert "60fps real" in printed
+
+    def test_slowmo_frames_are_each_shown_once_at_real_rate(self, capsys) -> None:
+        streams = [_stream(_plan(60, 60.0)), _stream(_plan(60, 30.0), slowmo=2.0)]
+        consumed: list[list[int]] = [[], []]
+
+        def fake_frames(i: int):
+            def frames(on_progress=None):
+                for n in range(60):
+                    consumed[i].append(n)
+                    yield np.full((60, 40, 3), n, dtype=np.uint8)
+
+            return frames
+
+        for i, stream in enumerate(streams):
+            stream.frames = fake_frames(i)  # type: ignore[method-assign]
+
+        output = cli.build_output_stream(streams)
+        rows = list(output.frames)
+        capsys.readouterr()
+
+        assert len(rows) == 60
+        assert consumed[1] == list(range(60))
+
+    def test_single_video_renders_at_real_speed(self, capsys) -> None:
+        output = cli.build_output_stream([_stream(_plan(10, 30.0), slowmo=4.0)])
+        capsys.readouterr()
+
+        assert output.fps == 120.0
+        assert output.total_frames == 10
 
 
 def _validated(argv: list[str]) -> list[cli.VideoInput]:
@@ -291,6 +349,71 @@ class TestLabelOption:
         inputs = _validated(["-i", "a.mp4:0:10", "--label", "Run 2: final"])
 
         assert inputs[0].label == "Run 2: final"
+
+
+class TestSlowmoOption:
+    """Slow-motion factors are paired with the inputs like labels."""
+
+    def test_default_is_one(self) -> None:
+        inputs = _validated(["-i", "a.mp4:0:10", "-i", "b.mp4:0:10"])
+
+        assert [vi.slowmo for vi in inputs] == [1.0, 1.0]
+
+    def test_reaches_the_single_video(self) -> None:
+        inputs = _validated(["video.mp4", "0", "10", "--slowmo", "2"])
+
+        assert [vi.slowmo for vi in inputs] == [2.0]
+
+    def test_single_video_default_is_one(self) -> None:
+        inputs = _validated(["video.mp4", "0", "10"])
+
+        assert [vi.slowmo for vi in inputs] == [1.0]
+
+    def test_pairs_with_inputs_in_order(self) -> None:
+        inputs = _validated(
+            ["-i", "a.mp4:0:10", "-i", "b.mp4:0:10", "--slowmo", "1", "--slowmo", "2.5"]
+        )
+
+        assert [(vi.path.stem, vi.slowmo) for vi in inputs] == [("a", 1.0), ("b", 2.5)]
+
+    def test_missing_values_are_one(self) -> None:
+        inputs = _validated(["-i", "a.mp4:0:10", "-i", "b.mp4:0:10", "--slowmo", "4"])
+
+        assert [vi.slowmo for vi in inputs] == [4.0, 1.0]
+
+    def test_more_values_than_inputs_exits_non_zero(self, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _validated(["-i", "a.mp4:0:10", "--slowmo", "2", "--slowmo", "4"])
+
+        assert exc.value.code != 0
+        assert "--slowmo" in capsys.readouterr().err
+
+    def test_several_values_in_positional_mode_exits_non_zero(self, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _validated(["video.mp4", "0", "10", "--slowmo", "2", "--slowmo", "4"])
+
+        assert exc.value.code != 0
+        assert capsys.readouterr().err != ""
+
+    @pytest.mark.parametrize("value", ["0", "-2", "nan", "inf", "-inf"])
+    def test_non_positive_value_exits_non_zero(self, value: str, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _validated(["-i", "a.mp4:0:10", f"--slowmo={value}"])
+
+        assert exc.value.code != 0
+        assert "--slowmo" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("value", ["0", "nan", "inf"])
+    def test_non_positive_value_in_positional_mode_exits_non_zero(self, value: str, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _validated(["video.mp4", "0", "10", f"--slowmo={value}"])
+
+        assert exc.value.code != 0
+        assert "--slowmo" in capsys.readouterr().err
+
+    def test_non_numeric_value_exits_non_zero(self) -> None:
+        with pytest.raises(SystemExit):
+            _validated(["video.mp4", "0", "10", "--slowmo", "fast"])
 
 
 class TestSublabelOption:

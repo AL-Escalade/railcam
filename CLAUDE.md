@@ -101,6 +101,7 @@ a different scale.
 - **5:3 aspect ratio**: Portrait orientation optimized for vertical climbing videos
 - **ClimberSelector**: `AUTO` (proximity-based tracking), `LEFT`, or `RIGHT` (for dual-lane walls)
 - **LCM FPS sync**: Multi-video output uses LCM of all input FPS values to prevent judder
+- **Slowmo**: `--slowmo FACTOR` per video (paired with the inputs like `--label`); the real fps is container fps x factor, and time sync, durations and the LCM use the real fps while detection/tracking/smoothing stay frame-based
 
 ## Code Conventions
 

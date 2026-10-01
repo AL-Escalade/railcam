@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import closing
@@ -127,6 +128,9 @@ Examples:
   # Second line, drawn smaller under the label (paired with the inputs too)
   railcam video.mp4 100 250 --label "Dupont" --sublabel "4.704"
   railcam --input v1.mp4:0:100 --input v2.mp4:0:150 --sublabel "4.704" --sublabel "5.120"
+
+  # Slow-motion footage, synchronized on its real capture rate (paired with the inputs too)
+  railcam --input v1.mp4:0:100 --input v2.mp4:0:300 --slowmo 1 --slowmo 4  # v2 is 4x slow-mo
         """,
     )
 
@@ -184,6 +188,18 @@ Examples:
         help="Second line, drawn under the label in a smaller font (can be repeated). "
         "Paired with the inputs like --label, and usable without a label. "
         "Use --sublabel=TEXT when the text starts with a dash.",
+    )
+
+    parser.add_argument(
+        "--slowmo",
+        type=float,
+        action="append",
+        dest="slowmos",
+        metavar="FACTOR",
+        help="Slow-motion factor of a video (can be repeated): 2 means the footage plays "
+        "2x slower than real life, so its real frame rate is twice the file's. "
+        "Paired with the inputs like --label; inputs without a value get 1. "
+        "Used to synchronize videos on real time.",
     )
 
     # Climber selection (for positional mode)
@@ -308,6 +324,40 @@ def _texts_for_inputs(values: list[str], input_count: int, option: str) -> list[
     return values + [""] * (input_count - len(values))
 
 
+def _slowmos_for_inputs(values: list[float], input_count: int) -> list[float]:
+    """Pair the --slowmo factors with the inputs, defaulting to 1.
+
+    Args:
+        values: Factors in the order they were given.
+        input_count: Number of inputs they are paired with.
+
+    Returns:
+        One factor per input, 1.0 where none was given.
+
+    Raises:
+        SystemExit: If more factors than inputs were given, or one is not positive.
+    """
+    if input_count == 1 and len(values) > 1:
+        print(
+            f"Error: {len(values)} --slowmo options given for a single video. "
+            "Use --input to render several videos.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if len(values) > input_count:
+        print(
+            f"Error: {len(values)} --slowmo option(s) given for {input_count} input(s). "
+            "--slowmo values are paired with the inputs in order.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    for value in values:
+        if not (math.isfinite(value) and value > 0):
+            print(f"Error: --slowmo must be a positive number, got {value:g}.", file=sys.stderr)
+            sys.exit(1)
+    return values + [1.0] * (input_count - len(values))
+
+
 def validate_args(args: argparse.Namespace) -> list[VideoInput]:
     """Validate and convert arguments to VideoInput list.
 
@@ -321,6 +371,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
     has_inputs = args.inputs is not None and len(args.inputs) > 0
     labels: list[str] = list(args.labels or [])
     sublabels: list[str] = list(args.sublabels or [])
+    slowmos: list[float] = list(args.slowmos or [])
 
     if has_positional and has_inputs:
         print(
@@ -348,6 +399,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
 
         label = _text_for_single_video(labels, "--label")
         sublabel = _text_for_single_video(sublabels, "--sublabel")
+        (slowmo,) = _slowmos_for_inputs(slowmos, 1)
 
         # Parse climber selector for positional mode
         climber_selector = ClimberSelector.AUTO
@@ -364,6 +416,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
                 climber_selector=climber_selector,
                 label=label,
                 sublabel=sublabel,
+                slowmo=slowmo,
             )
         ]
 
@@ -378,6 +431,7 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
 
     labels = _texts_for_inputs(labels, len(args.inputs), "--label")
     sublabels = _texts_for_inputs(sublabels, len(args.inputs), "--sublabel")
+    slowmos = _slowmos_for_inputs(slowmos, len(args.inputs))
 
     try:
         video_inputs = [parse_input_spec(spec) for spec in args.inputs]
@@ -385,9 +439,10 @@ def validate_args(args: argparse.Namespace) -> list[VideoInput]:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    for video_input, text, subtext in zip(video_inputs, labels, sublabels):
+    for video_input, text, subtext, slowmo in zip(video_inputs, labels, sublabels, slowmos):
         video_input.label = text
         video_input.sublabel = subtext
+        video_input.slowmo = slowmo
 
     return video_inputs
 
@@ -826,6 +881,18 @@ class VideoStream:
     video_input: VideoInput
     detections_by_frame: dict[int, DetectionResult]
 
+    @property
+    def real_fps(self) -> float:
+        """Capture rate in real time: the file's rate times the slow-motion factor."""
+        return self.plan.fps * self.video_input.slowmo
+
+    def describe_fps(self) -> str:
+        """The frame rate as printed, showing the slow-motion factor when there is one."""
+        slowmo = self.video_input.slowmo
+        if slowmo == 1.0:
+            return f"{self.plan.fps:.1f}fps"
+        return f"{self.plan.fps:.4g}fps x{slowmo:g} slowmo -> {self.real_fps:.4g}fps real"
+
     def frames(self, on_progress: Callable[[int, int], None] | None = None) -> Iterator[np.ndarray]:
         """Produce the cropped frames, re-reading the source video."""
         return crop_frames(self.plan, self.video_input, self.detections_by_frame, on_progress)
@@ -1015,16 +1082,22 @@ def build_output_stream(
     For a single video the cropped frames are the output. For several, each
     video's crop stream is pulled through a cursor driven by the time
     synchronization indices, and one composed row is emitted per output frame.
+
+    Time is real time: a slow-motion video counts at its real capture rate,
+    so a single one renders at real speed and several stay in step.
     """
     if len(streams) == 1:
-        plan = streams[0].plan
+        stream = streams[0]
+        plan = stream.plan
         width, height = plan.final_size
+        if stream.video_input.slowmo != 1.0:
+            print(f"\n  Slow motion: {stream.describe_fps()}")
         return OutputStream(
-            frames=streams[0].frames(),
+            frames=stream.frames(),
             width=width,
             height=height,
             total_frames=len(plan.positions),
-            fps=plan.fps,
+            fps=stream.real_fps,
         )
 
     print("\n=== Synchronizing and composing ===")
@@ -1034,7 +1107,7 @@ def build_output_stream(
     # wrong, and a duration longer than the frames that exist would stretch the
     # render by freezing on the last frame.
     decoded_counts = [len(s.plan.positions) for s in streams]
-    fps_list = [s.plan.fps for s in streams]
+    fps_list = [s.real_fps for s in streams]
     durations = [calculate_duration(fc, fps) for fc, fps in zip(decoded_counts, fps_list)]
     max_duration = calculate_max_duration(decoded_counts, fps_list)
 
@@ -1059,7 +1132,7 @@ def build_output_stream(
         freeze = " (freezes)" if durations[i] < max_duration else ""
         print(
             f"  Video {i + 1}: {stream.plan.output_width}x{stream.plan.frame_height}, "
-            f"{durations[i]:.2f}s @ {fps_list[i]:.1f}fps{freeze}"
+            f"{durations[i]:.2f}s @ {stream.describe_fps()}{freeze}"
         )
 
     def compose(parts: list[np.ndarray]) -> np.ndarray:

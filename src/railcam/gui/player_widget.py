@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, QRect, Qt, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -21,14 +22,33 @@ from PySide6.QtWidgets import (
 
 from railcam.gui.frame_source import FrameSource
 from railcam.gui.imaging import frame_to_qimage
-from railcam.gui.project import VideoEntry, clamp_range
+from railcam.gui.playback import real_fps
+from railcam.gui.project import (
+    SLOWMO_DECIMALS,
+    SLOWMO_MAX,
+    SLOWMO_MIN,
+    VideoEntry,
+    clamp_range,
+)
 from railcam.gui.timeline import TimelineWidget
 from railcam.gui.viewport import Viewport, wheel_zoom_factor
 
 _STEP_SMALL = 1
 _STEP_LARGE = 10
+_SLOWMO_STEP = 0.5
 
 CLIMBER_LABELS = [("auto", "Auto"), ("left", "Gauche"), ("right", "Droite")]
+
+
+class FactorSpinBox(QDoubleSpinBox):
+    """Spin box showing a factor without trailing zeros ("×2", "×2,5")."""
+
+    def textFromValue(self, value: float) -> str:
+        text = self.locale().toString(value, "f", self.decimals())
+        point = self.locale().decimalPoint()
+        if point in text:
+            text = text.rstrip("0").rstrip(point)
+        return text
 
 
 class FrameDisplay(QLabel):
@@ -258,6 +278,15 @@ class PlayerWidget(QFrame):
         self.sublabel_edit.setToolTip("Seconde ligne, affichée sous la légende en plus petit")
         self.sublabel_edit.textChanged.connect(lambda _: self.stateChanged.emit())
         range_row.addWidget(self.sublabel_edit)
+        self.slowmo_spin = FactorSpinBox()
+        self.slowmo_spin.setPrefix("Ralenti ×")
+        self.slowmo_spin.setRange(SLOWMO_MIN, SLOWMO_MAX)
+        self.slowmo_spin.setSingleStep(_SLOWMO_STEP)
+        self.slowmo_spin.setDecimals(SLOWMO_DECIMALS)
+        self.slowmo_spin.setValue(1.0)
+        self.slowmo_spin.setToolTip("Facteur de ralenti : 2 = filmée 2× plus lentement que le réel")
+        self.slowmo_spin.valueChanged.connect(self._on_slowmo_changed)
+        range_row.addWidget(self.slowmo_spin)
         range_row.addWidget(QLabel("Grimpeur :"))
         self.climber_combo = QComboBox()
         for value, label in CLIMBER_LABELS:
@@ -272,9 +301,14 @@ class PlayerWidget(QFrame):
     def _refresh_header(self) -> None:
         meta = self.source.metadata
         self.title.setText(meta.path.name)
-        self.info.setText(
-            f"{meta.width}×{meta.height} · {meta.fps:.4g} fps · {meta.total_frames} img"
-        )
+        fps = f"{meta.fps:.4g} fps"
+        if self.slowmo != 1.0:
+            fps += f" (réel {real_fps(meta.fps, self.slowmo):.4g})"
+        self.info.setText(f"{meta.width}×{meta.height} · {fps} · {meta.total_frames} img")
+
+    def _on_slowmo_changed(self, _value: float) -> None:
+        self._refresh_header()
+        self.stateChanged.emit()
 
     def set_move_state(self, can_move_left: bool, can_move_right: bool) -> None:
         """Enable the reorder buttons according to the player's position in the row."""
@@ -295,6 +329,11 @@ class PlayerWidget(QFrame):
     def sublabel(self) -> str:
         return self.sublabel_edit.text()
 
+    @property
+    def slowmo(self) -> float:
+        """How many times slower than real life the footage plays (1 = real time)."""
+        return float(self.slowmo_spin.value())
+
     def to_video_entry(self) -> VideoEntry:
         return VideoEntry(
             path=self.source.path,
@@ -303,10 +342,11 @@ class PlayerWidget(QFrame):
             climber=self.climber,
             label=self.label,
             sublabel=self.sublabel,
+            slowmo=self.slowmo,
         )
 
     def apply_entry(self, entry: VideoEntry) -> None:
-        """Restore range, climber and labels from a project entry."""
+        """Restore range, climber, labels and slow-motion factor from a project entry."""
         self.start_frame = entry.start_frame
         self.end_frame = entry.end_frame
         index = self.climber_combo.findData(entry.climber)
@@ -314,6 +354,7 @@ class PlayerWidget(QFrame):
             self.climber_combo.setCurrentIndex(index)
         self.label_edit.setText(entry.label)
         self.sublabel_edit.setText(entry.sublabel)
+        self.slowmo_spin.setValue(entry.slowmo)
         self.timeline.set_range(self.start_frame, self.end_frame)
         self.display_frame(self.start_frame)
         self._refresh_labels()

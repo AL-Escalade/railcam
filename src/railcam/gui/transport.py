@@ -7,7 +7,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QElapsedTimer, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QToolButton, QWidget
 
-from railcam.gui.playback import PlaybackClock, frame_at, session_duration
+from railcam.gui.playback import PlaybackClock, frame_at, real_fps, session_duration
 from railcam.gui.player_widget import PlayerWidget
 
 _TICK_MS = 33  # ~30 UI updates per second
@@ -72,11 +72,13 @@ class SyncPlayback(QObject):
         players = self._get_players()
         ranges = []
         for player in players:
-            index = frame_at(self._clock.t, player.start_frame, player.end_frame, player.source.fps)
+            # The clock runs in real time, as the render's time sync does
+            fps = real_fps(player.source.fps, player.slowmo)
+            index = frame_at(self._clock.t, player.start_frame, player.end_frame, fps)
             if self._shown.get(player) != index:
                 player.display_frame(index)
                 self._shown[player] = index
-            ranges.append((player.start_frame, player.end_frame, player.source.fps))
+            ranges.append((player.start_frame, player.end_frame, fps))
 
         # Auto-pause once every video is frozen on its end frame
         if self._clock.t > session_duration(ranges):

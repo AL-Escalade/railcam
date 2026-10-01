@@ -29,6 +29,15 @@ class PlaybackClock:
         self._t = 0.0
 
 
+def real_fps(container_fps: float, slowmo: float) -> float:
+    """Return the capture rate of footage played slowmo times slower than real life.
+
+    Synchronization happens in real time, so a slow-motion video must advance
+    through its frames slowmo times faster than its container fps says.
+    """
+    return container_fps * slowmo
+
+
 def session_duration(ranges: list[tuple[int, int, float]]) -> float:
     """Return the duration of the longest (start, end, fps) range, in seconds."""
     if not ranges:

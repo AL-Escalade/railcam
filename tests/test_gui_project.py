@@ -9,6 +9,8 @@ import pytest
 
 from railcam.gui.project import (
     MODEL_LABELS,
+    SLOWMO_MAX,
+    SLOWMO_MIN,
     VALID_MODELS,
     Project,
     ProjectError,
@@ -345,3 +347,69 @@ class TestClampRange:
 
     def test_single_frame_video_collapses_the_range(self) -> None:
         assert clamp_range(5, 20, 1) == (0, 0)
+
+
+class TestSlowmo:
+    """Per-video slow-motion factor stored in the project file."""
+
+    @staticmethod
+    def _write(target: Path, video: dict[str, object]) -> None:
+        base = {"path": "a.mp4", "start_frame": 0, "end_frame": 10}
+        target.write_text(
+            json.dumps({"version": 1, "videos": [{**base, **video}], "render": {}}),
+            encoding="utf-8",
+        )
+
+    def test_default_is_real_time(self, tmp_path: Path) -> None:
+        assert VideoEntry(path=tmp_path / "a.mp4", start_frame=0, end_frame=10).slowmo == 1.0
+
+    def test_round_trip(self, tmp_path: Path) -> None:
+        project = Project(
+            videos=[
+                VideoEntry(path=tmp_path / "a.mp4", start_frame=0, end_frame=10, slowmo=2.5),
+                VideoEntry(path=tmp_path / "b.mp4", start_frame=0, end_frame=10),
+            ],
+            render=RenderOptions(),
+        )
+        target = tmp_path / "session.railcam.json"
+
+        project.save(target)
+        loaded = Project.load(target)
+
+        assert [video.slowmo for video in loaded.videos] == [2.5, 1.0]
+        assert loaded == project
+
+    def test_absent_field_means_real_time(self, tmp_path: Path) -> None:
+        target = tmp_path / "old.railcam.json"
+        self._write(target, {})
+
+        assert Project.load(target).videos[0].slowmo == 1.0
+
+    def test_integer_value_is_accepted(self, tmp_path: Path) -> None:
+        target = tmp_path / "int.railcam.json"
+        self._write(target, {"slowmo": 4})
+
+        assert Project.load(target).videos[0].slowmo == 4.0
+
+    def test_fine_value_survives_a_round_trip(self, tmp_path: Path) -> None:
+        target = tmp_path / "fine.railcam.json"
+        self._write(target, {"slowmo": 2.3333})
+
+        assert Project.load(target).videos[0].slowmo == 2.3333
+
+    @pytest.mark.parametrize("value", [SLOWMO_MIN, 32, SLOWMO_MAX])
+    def test_values_within_the_editable_range_are_kept(self, tmp_path: Path, value: float) -> None:
+        target = tmp_path / "range.railcam.json"
+        self._write(target, {"slowmo": value})
+
+        assert Project.load(target).videos[0].slowmo == value
+
+    @pytest.mark.parametrize(
+        "value", [0, -2, "2", None, True, 0.05, 100, float("inf"), float("nan")]
+    )
+    def test_invalid_value_is_rejected(self, tmp_path: Path, value: object) -> None:
+        target = tmp_path / "bad.railcam.json"
+        self._write(target, {"slowmo": value})
+
+        with pytest.raises(ProjectError, match="slow-motion"):
+            Project.load(target)

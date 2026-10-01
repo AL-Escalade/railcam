@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,9 @@ class VideoInput:
     climber_selector: ClimberSelector = ClimberSelector.AUTO
     label: str = ""
     sublabel: str = ""
+    # How many times slower than real life the footage plays: the real capture
+    # rate is the container fps times this factor
+    slowmo: float = 1.0
 
     def __post_init__(self) -> None:
         """Validate the input specification."""
@@ -32,6 +36,8 @@ class VideoInput:
             raise InputParseError(
                 f"End frame ({self.end_frame}) must be > start frame ({self.start_frame})"
             )
+        if not (math.isfinite(self.slowmo) and self.slowmo > 0):
+            raise InputParseError(f"Slow-motion factor must be > 0, got {self.slowmo}")
 
 
 def parse_climber_selector(selector_str: str) -> ClimberSelector:

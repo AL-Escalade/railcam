@@ -51,6 +51,8 @@ def build_cli_args(project: Project) -> list[str]:
     # right.
     any_label = any(video.label for video in project.videos)
     any_sublabel = any(video.sublabel for video in project.videos)
+    # Same positional pairing for slow-motion factors
+    any_slowmo = any(video.slowmo != 1.0 for video in project.videos)
     for video in project.videos:
         args.extend(["-i", _input_spec(video)])
         if any_label:
@@ -59,6 +61,8 @@ def build_cli_args(project: Project) -> list[str]:
             args.append(f"--label={video.label}")
         if any_sublabel:
             args.append(f"--sublabel={video.sublabel}")
+        if any_slowmo:
+            args.append(f"--slowmo={video.slowmo:g}")
 
     render = project.render
     if render.format != defaults.format:

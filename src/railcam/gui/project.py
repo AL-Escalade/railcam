@@ -24,6 +24,14 @@ DEFAULT_MODEL_SIZE = "s"
 # Mirrors railcam.pose.MIN_IMGSZ: the lowest resolution the CLI accepts.
 MIN_IMGSZ = 640
 
+# Slow-motion factors the player's spin box can show. A loaded value outside
+# this range, or finer than SLOWMO_DECIMALS, would be clamped or rounded by the
+# widget and written back on the next save, so the loader rejects it instead.
+# 64 covers 960 fps super slow motion stored at 15 fps.
+SLOWMO_MIN = 0.1
+SLOWMO_MAX = 64.0
+SLOWMO_DECIMALS = 4
+
 # Labels for the model selector, naming both the trade-off and the CLI value.
 # The panel displays the equivalent CLI command, so a user who picks "Précis"
 # must be able to recognise the `--model m` they end up copying.
@@ -64,6 +72,9 @@ class VideoEntry:
     climber: str = "auto"
     label: str = ""
     sublabel: str = ""
+    # How many times slower than real life the footage plays: a 30 fps file
+    # filmed at 120 fps has a factor of 4. Time sync uses fps * slowmo.
+    slowmo: float = 1.0
 
 
 @dataclass
@@ -99,6 +110,7 @@ class Project:
                     "climber": video.climber,
                     "label": video.label,
                     "sublabel": video.sublabel,
+                    "slowmo": video.slowmo,
                 }
                 for video in self.videos
             ],
@@ -185,6 +197,20 @@ def _load_video_entry(entry: Any, project_dir: Path) -> VideoEntry:
     if not isinstance(sublabel, str):
         raise ProjectError(f"Invalid sublabel: {sublabel!r}. Expected a string.")
 
+    # Absent in project files written before slow-motion factors existed.
+    # bool is an int subclass, but `true` is no factor.
+    slowmo = entry.get("slowmo", 1.0)
+    if (
+        isinstance(slowmo, bool)
+        or not isinstance(slowmo, (int, float))
+        or not SLOWMO_MIN <= slowmo <= SLOWMO_MAX
+        or round(slowmo, SLOWMO_DECIMALS) != slowmo
+    ):
+        raise ProjectError(
+            f"Invalid slow-motion factor: {slowmo!r}. Expected a number between "
+            f"{SLOWMO_MIN:g} and {SLOWMO_MAX:g} with at most {SLOWMO_DECIMALS} decimals."
+        )
+
     path = Path(raw_path)
     if not path.is_absolute():
         path = project_dir / path
@@ -195,6 +221,7 @@ def _load_video_entry(entry: Any, project_dir: Path) -> VideoEntry:
         climber=climber,
         label=label,
         sublabel=sublabel,
+        slowmo=float(slowmo),
     )
 
 

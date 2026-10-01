@@ -252,3 +252,49 @@ def test_displayed_command_survives_a_shell_round_trip_with_a_sublabel(sublabel:
     command = format_cli_command(project)
 
     assert shlex.split(command) == ["railcam", *build_cli_args(project)]
+
+
+class TestSlowmo:
+    """--slowmo is paired with the inputs positionally, like --label."""
+
+    def test_omitted_when_every_video_is_real_time(self) -> None:
+        project = Project(
+            videos=[
+                VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10),
+                VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10),
+            ],
+            render=RenderOptions(),
+        )
+
+        assert not any(arg.startswith("--slowmo") for arg in build_cli_args(project))
+
+    def test_emitted_for_every_video_when_one_is_slowed(self) -> None:
+        project = Project(
+            videos=[
+                VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10),
+                VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10, slowmo=2.5),
+            ],
+            render=RenderOptions(),
+        )
+
+        assert build_cli_args(project) == [
+            "-i",
+            "a.mp4:0:10",
+            "--slowmo=1",
+            "-i",
+            "b.mp4:0:10",
+            "--slowmo=2.5",
+        ]
+
+    def test_built_args_are_parsed_back_as_slowmos_by_the_cli(self) -> None:
+        project = Project(
+            videos=[
+                VideoEntry(path=Path("a.mp4"), start_frame=0, end_frame=10),
+                VideoEntry(path=Path("b.mp4"), start_frame=0, end_frame=10, slowmo=2.5),
+            ],
+            render=RenderOptions(),
+        )
+
+        inputs = validate_args(create_parser().parse_args(build_cli_args(project)))
+
+        assert [video.slowmo for video in inputs] == [1.0, 2.5]

@@ -79,6 +79,22 @@ class TestVideoInput:
         with pytest.raises(InputParseError, match="End frame.*must be >"):
             VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=100)
 
+    def test_default_slowmo_is_one(self):
+        vi = VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=250)
+        assert vi.slowmo == 1.0
+
+    def test_slowmo_is_kept(self):
+        vi = VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=250, slowmo=2.5)
+        assert vi.slowmo == 2.5
+
+    @pytest.mark.parametrize("slowmo", [0.0, -1.0, float("nan"), float("inf")])
+    def test_non_positive_slowmo_raises(self, slowmo):
+        with pytest.raises(InputParseError, match="Slow-motion factor must be > 0"):
+            VideoInput(path=Path("video.mp4"), start_frame=100, end_frame=250, slowmo=slowmo)
+
+    def test_spec_parsing_leaves_slowmo_at_one(self):
+        assert parse_input_spec("video.mp4:100:250:left").slowmo == 1.0
+
 
 class TestParseClimberSelector:
     def test_left_lowercase(self):

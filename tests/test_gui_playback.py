@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from railcam.gui.playback import PlaybackClock, frame_at, session_duration
+from railcam.gui.playback import PlaybackClock, frame_at, real_fps, session_duration
 
 
 def test_time_zero_maps_to_start_frame() -> None:
@@ -74,3 +74,22 @@ def test_session_duration_is_longest_video_range() -> None:
 
 def test_session_duration_empty_is_zero() -> None:
     assert session_duration([]) == 0.0
+
+
+def test_real_fps_scales_the_container_fps_by_the_slowmo_factor() -> None:
+    assert real_fps(30.0, 1.0) == pytest.approx(30.0)
+    assert real_fps(30.0, 4.0) == pytest.approx(120.0)
+
+
+def test_slowmo_video_stays_synchronized_with_a_real_time_one() -> None:
+    # A 30 fps file filmed at 4x slow motion holds 120 real frames per second
+    t = 0.5
+    assert frame_at(t, start_frame=0, end_frame=500, fps=real_fps(30.0, 1.0)) == 15
+    assert frame_at(t, start_frame=0, end_frame=500, fps=real_fps(30.0, 4.0)) == 60
+
+
+def test_session_duration_uses_the_real_fps() -> None:
+    # 240 frames of a 30 fps file slowed 4x last 2 real seconds, not 8
+    ranges = [(0, 240, real_fps(30.0, 4.0)), (0, 45, real_fps(30.0, 1.0))]
+
+    assert session_duration(ranges) == pytest.approx(2.0)
