@@ -530,3 +530,25 @@ def test_two_climbers_are_both_kept_when_one_rises_less() -> None:
 
     assert select_track([left, right], ClimberSelector.RIGHT) is right
     assert select_track([left, right], ClimberSelector.LEFT) is left
+
+
+def test_a_slower_climber_is_still_a_climber() -> None:
+    """Villars 2021 finals, frames 46260-46332: both climbers seen on all 73.
+
+    The right one rose 0.114 against the left one's 0.242 -- 47%, just under
+    a relative bar of half -- so --climber right returned the left one.
+    """
+    left = make_track({f: (0.28, 0.73 - 0.0036 * f) for f in range(73)})
+    right = make_track({f: (0.76, 0.70 - 0.0016 * f) for f in range(73)})
+
+    assert select_track([left, right], ClimberSelector.RIGHT) is right
+    assert select_track([left, right], ClimberSelector.LEFT) is left
+
+
+def test_a_phantom_never_sets_the_rise_to_beat() -> None:
+    """Coverage is cut first: a hold seen briefly must not raise the bar."""
+    climber = make_track({f: (0.30, 0.80 - 0.002 * f) for f in range(90)})
+    other = make_track({f: (0.70, 0.80 - 0.0016 * f) for f in range(90)})
+    phantom = make_track({f: (0.90, 0.80 - 0.05 * f) for f in range(6)})
+
+    assert select_track([climber, other, phantom], ClimberSelector.RIGHT) is other

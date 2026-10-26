@@ -46,18 +46,18 @@ MIN_STEP_BUDGET = 0.01
 # other lane's climber and the belayer at the foot of the wall, which the
 # euclidean budget alone lets in once the gap widens.
 MAX_LANE_DRIFT = 0.10
-# A climbing track must cover at least this fraction of the best track's rise,
-# so detection fragments cannot outrank a full climb. The bar is relative on
-# purpose: an absolute one either excluded a climber whose section of the wall
-# is short, or admitted a hold as the only candidate when it alone cleared it.
-MIN_RELATIVE_SPAN = 0.5
-# ... and be detected on at least this fraction of the frames the best-covered
-# climbing track holds. Pose models report the occasional hold as a person, and
-# such a detection can drift upward through the frame as the camera pans, which
-# the rise alone cannot tell from a climb. It is never found as consistently as
-# a person, and the leftmost or rightmost candidate would otherwise be that
-# phantom rather than the climber.
+# A track must be detected on at least this fraction of the frames the
+# best-covered track holds. Pose models report the occasional hold as a person,
+# and such a detection can drift upward through the frame as the camera pans,
+# which the rise alone cannot tell from a climb. It is never found as
+# consistently as a person, and the leftmost or rightmost candidate would
+# otherwise be that phantom rather than the climber.
 MIN_RELATIVE_COVERAGE = 0.5
+# ... and rise at least this fraction of the best-covered climbers' rise. The
+# bar separates climbing from standing still, not a fast climber from a slow
+# one: two climbers on the same section differ by well under this factor, and
+# a bystander -- who is what this cut exists for -- does not rise at all.
+MIN_RELATIVE_SPAN = 0.2
 # During gap repair, a candidate this close to another track's detection on
 # the same frame is that other person — never attach it.
 OTHER_TRACK_EPSILON = 0.05
@@ -239,22 +239,24 @@ def build_tracks(frame_results: list[MultiPersonDetectionResult]) -> list[Track]
 def select_track(tracks: list[Track], selector: ClimberSelector) -> Track | None:
     """Choose the climber's track: selectors apply among the climbing ones.
 
-    Tracks that barely move next to the best one (static bystanders) are
-    excluded, as are those found on far fewer frames than it -- a pose model
-    reporting a hold as a person. Both cuts are relative to what this clip
-    actually holds, since how far a climber rises through the frame depends
-    entirely on the section and the framing.
+    Tracks found on far fewer frames than the best-covered one are excluded --
+    a pose model reporting a hold as a person -- and so are those that do not
+    rise next to them, the static bystanders. Both cuts are relative to what
+    this clip actually holds, since how far a climber rises through the frame
+    depends entirely on the section and the framing.
     """
     if not tracks:
         return None
 
-    best_rise = max(track.steady_rise for track in tracks)
-    candidates = [track for track in tracks if track.steady_rise >= MIN_RELATIVE_SPAN * best_rise]
-    best_coverage = max(len(track.detections) for track in candidates)
+    best_coverage = max(len(track.detections) for track in tracks)
     candidates = [
-        track
-        for track in candidates
-        if len(track.detections) >= MIN_RELATIVE_COVERAGE * best_coverage
+        track for track in tracks if len(track.detections) >= MIN_RELATIVE_COVERAGE * best_coverage
+    ]
+    # Coverage is judged first so the rise to beat comes from a well-detected
+    # track: a phantom seen on a handful of frames must not set the bar.
+    best_rise = max(track.steady_rise for track in candidates)
+    candidates = [
+        track for track in candidates if track.steady_rise >= MIN_RELATIVE_SPAN * best_rise
     ]
 
     if selector == ClimberSelector.LEFT:
