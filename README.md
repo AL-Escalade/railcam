@@ -62,23 +62,26 @@ Just reproducible, normalized clips ready for **performance analysis, coaching, 
 
 ## Installation
 
-### Prerequisites
+### Desktop app (no Python needed)
+
+Download the installer for your system from the
+[latest release](https://github.com/AL-Escalade/railcam/releases/latest):
+
+| System | File | First launch |
+|---|---|---|
+| macOS (Apple Silicon) | `.dmg` | The app is not signed: open it once, then *System Settings → Privacy & Security → Open Anyway* |
+| Windows | `.msi` | SmartScreen may warn about an unknown publisher: *More info → Run anyway* |
+| Linux | `.AppImage` | `chmod +x` the file, then run it |
+| Linux | `.flatpak` | `flatpak install --user <file>.flatpak` |
+
+The app tells you when a newer version is available.
+
+### Prerequisites (pip install)
 
 * Python **3.9+**
-* **FFmpeg** (video/GIF rendering)
 
-Install FFmpeg:
-
-```bash
-# macOS
-brew install ffmpeg
-
-# Ubuntu / Debian
-sudo apt install ffmpeg
-
-# Windows
-# Download from https://ffmpeg.org/download.html
-```
+FFmpeg is bundled with the `imageio-ffmpeg` dependency; an `ffmpeg` found on
+your `PATH` takes precedence.
 
 ### Install railcam
 
@@ -98,6 +101,13 @@ Development install:
 pip install -e ".[dev,gui]"
 pre-commit install  # Auto-setup git hooks (LFS check, linting)
 ```
+
+### Releases
+
+Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/)
+(`feat: …`, `fix: …`, `feat!: …` for breaking changes), since they become the
+squashed commits on `main`. release-please keeps a release PR open with the next
+version and changelog; merging it publishes the release and its installers.
 
 ---
 
@@ -331,4 +341,5 @@ railcam --help
 
 ## License
 
-MIT
+The source code is MIT. The desktop installers bundle Ultralytics YOLOv8 and
+are distributed under the AGPL-3.0 (see `packaging/licenses/`).

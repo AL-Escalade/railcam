@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - pyproject.toml
+      - packaging/**
+      - src/railcam/__main__.py
+      - src/railcam/packaged.py
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+env:
+  POSE_WEIGHTS_URL: https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8s-pose.pt
+  POSE_WEIGHTS_SHA256: 234314cd8baf62616791aceb9ea6ad5c19f26cf6c0d8f3a1bfce1e23b186cfb3
+
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+
+  installers:
+    needs: release-please
+    # Tags pushed with GITHUB_TOKEN trigger no other workflow, so installers are built here.
+    # On pull requests they are only built, to validate packaging changes.
+    if: >-
+      always() &&
+      (github.event_name == 'pull_request' || needs.release-please.outputs.created == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+            command: briefcase package macOS app --adhoc-sign
+          - name: Windows
+            os: windows-latest
+            command: briefcase package windows app --adhoc-sign
+          - name: AppImage
+            os: ubuntu-latest
+            command: briefcase package linux appimage --adhoc-sign
+          - name: Flatpak
+            os: ubuntu-latest
+            command: briefcase package linux flatpak --adhoc-sign
+    name: installer (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Briefcase
+        run: pip install briefcase==0.4.6
+      - name: Install Flatpak tooling
+        if: matrix.name == 'Flatpak'
+        run: |
+          sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      - name: Bundle pose weights
+        shell: bash
+        run: |
+          mkdir -p src/railcam/models
+          curl -sSfL "$POSE_WEIGHTS_URL" -o src/railcam/models/yolov8s-pose.pt
+          python -c "import hashlib, sys; d = hashlib.sha256(open('src/railcam/models/yolov8s-pose.pt', 'rb').read()).hexdigest(); sys.exit(d != '$POSE_WEIGHTS_SHA256')"
+      - name: Package
+        run: ${{ matrix.command }} --no-input
+      - name: Attach to the release
+        if: needs.release-please.outputs.created == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ needs.release-please.outputs.tag }}" dist/*
+      - name: Keep as workflow artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: dist/*
+          retention-days: 7

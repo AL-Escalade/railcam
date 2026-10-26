@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from importlib import resources
 from typing import Any
 
 import cv2
@@ -146,6 +147,16 @@ class DetectionResult:
     landmarks: list[tuple[float, float, float]] = field(default_factory=list)
 
 
+def _model_path(model_name: str) -> str:
+    """Weights shipped with the package (installers bundle them), else Ultralytics' cache."""
+    bundled = resources.files("railcam").joinpath("models", model_name)
+    if bundled.is_file():
+        return str(bundled)
+    # A bare name would make Ultralytics download into the current directory
+    weights_dir = settings.get("weights_dir", "")
+    return f"{weights_dir}/{model_name}" if weights_dir else model_name
+
+
 class PoseDetector:
     """Detects pelvis position using YOLOv8-pose."""
 
@@ -158,10 +169,8 @@ class PoseDetector:
         self.confidence_threshold = confidence_threshold
         # None means the resolution follows each frame's size
         self.imgsz = imgsz
-        # Load YOLOv8-pose model from stable cache directory (not current working dir)
         model_name = f"yolov8{model_size}-pose.pt"
-        weights_dir = settings.get("weights_dir", "")
-        model_path = f"{weights_dir}/{model_name}" if weights_dir else model_name
+        model_path = _model_path(model_name)
         print(f"Loading YOLOv8-pose model ({model_name})...")
         self._model = YOLO(model_path)
         print("Model loaded.")

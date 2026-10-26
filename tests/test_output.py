@@ -94,7 +94,7 @@ def _patch_ffmpeg(monkeypatch, process: _FakeProcess) -> list[list[str]]:
         commands.append(command)
         return process
 
-    monkeypatch.setattr(output, "check_ffmpeg", lambda: None)
+    monkeypatch.setattr(output, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(output.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(output, "_read_stderr", lambda _process, _handle: process._stderr)
     return commands
@@ -221,3 +221,14 @@ class TestStreamingEncoding:
                 height=3,
                 total_frames=9,
             )
+
+
+class TestFindFFmpeg:
+    def test_falls_back_to_bundled_binary(self, monkeypatch) -> None:
+        output.find_ffmpeg.cache_clear()
+        monkeypatch.setattr(output.shutil, "which", lambda _name: None)
+
+        path = output.find_ffmpeg()
+        output.find_ffmpeg.cache_clear()
+
+        assert Path(path).is_file()

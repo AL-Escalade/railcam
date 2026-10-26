@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 
 import pytest
 
 from railcam.cli import create_parser, validate_args
+from railcam.gui import render
 from railcam.gui.project import Project, RenderOptions, VideoEntry
 from railcam.gui.render import build_cli_args, format_cli_command
 
@@ -298,3 +300,9 @@ class TestSlowmo:
         inputs = validate_args(create_parser().parse_args(build_cli_args(project)))
 
         assert [video.slowmo for video in inputs] == [1.0, 2.5]
+
+
+def test_packaged_app_runs_cli_through_its_own_executable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(render, "is_packaged", lambda: True)
+
+    assert render.resolve_railcam_command() == (sys.executable, [])
