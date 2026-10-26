@@ -43,8 +43,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          - name: macOS arm64
             os: macos-14
+            command: briefcase package macOS app --adhoc-sign
+            executable: build/railcam/macos/app/Railcam.app/Contents/MacOS/Railcam
+          - name: macOS x86_64
+            os: macos-15-intel
             command: briefcase package macOS app --adhoc-sign
             executable: build/railcam/macos/app/Railcam.app/Contents/MacOS/Railcam
           - name: Windows
@@ -80,6 +84,9 @@ jobs:
           python -c "import hashlib, sys; d = hashlib.sha256(open('src/railcam/models/yolov8s-pose.pt', 'rb').read()).hexdigest(); sys.exit(d != '$POSE_WEIGHTS_SHA256')"
       - name: Package
         run: ${{ matrix.command }} --no-input
+      - name: Name the macOS installer after its architecture
+        if: runner.os == 'macOS'
+        run: for dmg in dist/*.dmg; do mv "$dmg" "${dmg%.dmg}-$(uname -m).dmg"; done
       - name: Run the CLI through the packaged executable
         if: matrix.executable
         shell: bash
