@@ -84,6 +84,7 @@ bundle = "io.github.alescalade"
 [tool.briefcase.app.railcam]
 formal_name = "Railcam"
 description = "Climber-tracking crops of climbing videos"
+icon = "packaging/icons/railcam"
 # Bundling Ultralytics makes the installers AGPL-3.0; the source stays MIT
 license = "AGPL-3.0-only"
 license-files = [
