@@ -15,7 +15,7 @@
 
 ## 4. Release
 - [x] 4.1 Briefcase config in `pyproject.toml` (CPU-only torch, resources)
-- [ ] 4.9 App icon (Briefcase default for now)
+- [x] 4.9 App icon (`packaging/icons/railcam.svg`, exported to icns, ico and png)
 - [x] 4.2 release-please config (Python, `pyproject.toml`, `CHANGELOG.md`, bootstrap SHA; `Release-As: 1.0.0` footer on the merge)
 - [x] 4.3 `release.yml`: release-please, then build matrix (dmg, msi, flatpak) with a packaged CLI smoke test uploaded to the release
 - [x] 4.4 `pr-title.yml`: Conventional Commits lint on PR titles
