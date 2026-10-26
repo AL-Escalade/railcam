@@ -69,7 +69,8 @@ Download the installer for your system from the
 
 | System | File | First launch |
 |---|---|---|
-| macOS (Apple Silicon) | `.dmg` | The app is not signed: open it once, then *System Settings → Privacy & Security → Open Anyway* |
+| macOS (Apple Silicon) | `-arm64.dmg` | The app is not signed: open it once, then *System Settings → Privacy & Security → Open Anyway* |
+| macOS (Intel) | `-x86_64.dmg` | Same as Apple Silicon |
 | Windows | `.msi` | SmartScreen may warn about an unknown publisher: *More info → Run anyway* |
 | Linux | `.flatpak` | `flatpak install --user <file>.flatpak` |
 

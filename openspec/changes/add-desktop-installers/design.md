@@ -34,7 +34,11 @@ FFmpeg on `PATH` (`output.py`) and lets Ultralytics fetch weights on first use
 - **Packaged detection**: the app's `railcam` dist-info has `INSTALLER` set to
   `briefcase`; `sys.executable` is then the app binary, which always runs
   `railcam/__main__.py`.
-- **macOS arm64 only**: Intel Macs are not built.
+- **Separate Intel `.dmg`** rather than a universal build: PyTorch publishes no
+  Intel macOS wheel after 2.2.2, so a universal app would pin Apple Silicon to
+  torch 2.2 too. Intel builds get torch 2.2.2 and NumPy 1 (dependency marker);
+  detection results are identical, only slower. Drop the Intel build once
+  Ultralytics stops supporting torch 2.2.
 - **CPU-only torch** in installers: CUDA wheels would add ~2 GB on Linux and
   Windows.
 - **Update check**: `QNetworkAccessManager` GET on
