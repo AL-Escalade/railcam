@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import shutil
 import subprocess
 import tempfile
@@ -33,15 +34,23 @@ class OutputGenerationError(Exception):
 GifGenerationError = OutputGenerationError
 
 
-def check_ffmpeg() -> None:
-    """Check if FFmpeg is available."""
-    if shutil.which("ffmpeg") is None:
+@functools.cache
+def find_ffmpeg() -> str:
+    """Path of the FFmpeg executable: the one on PATH, else the one bundled by imageio-ffmpeg."""
+    on_path = shutil.which("ffmpeg")
+    if on_path is not None:
+        return on_path
+    try:
+        import imageio_ffmpeg  # type: ignore[import-untyped]
+
+        return str(imageio_ffmpeg.get_ffmpeg_exe())
+    except (ImportError, RuntimeError):
         raise FFmpegNotFoundError(
             "FFmpeg not found. Please install FFmpeg:\n"
             "  macOS: brew install ffmpeg\n"
             "  Ubuntu/Debian: sudo apt install ffmpeg\n"
             "  Windows: https://ffmpeg.org/download.html"
-        )
+        ) from None
 
 
 def _raw_input_args(fps: float, width: int, height: int) -> list[str]:
@@ -51,7 +60,7 @@ def _raw_input_args(fps: float, width: int, height: int) -> list[str]:
     OpenCV BGR arrays, which map directly onto `rawvideo` with `bgr24`.
     """
     return [
-        "ffmpeg",
+        find_ffmpeg(),
         "-y",
         "-hide_banner",
         "-nostats",
@@ -208,7 +217,6 @@ def generate_output_stream(
     """
     if total_frames <= 0:
         raise OutputGenerationError("No frames to process")
-    check_ffmpeg()
 
     if output_format == OutputFormat.GIF:
         command = build_gif_command(output_path, fps, width, height)

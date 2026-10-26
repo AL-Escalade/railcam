@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import sys
 from importlib import resources
 from pathlib import Path
@@ -24,6 +25,8 @@ from railcam.gui.player_widget import PlayerWidget
 from railcam.gui.project import Project, ProjectError, RenderOptions
 from railcam.gui.render_panel import RenderPanel
 from railcam.gui.transport import SyncPlayback, TransportBar
+from railcam.gui.updates import UpdateChecker
+from railcam.packaged import is_packaged
 from railcam.video import VideoError
 
 PROJECT_FILTER = "Projet railcam (*.railcam.json)"
@@ -66,6 +69,18 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self._on_state_changed()
+
+        if is_packaged():
+            updates = UpdateChecker(self)
+            updates.updateAvailable.connect(self._show_update)
+            updates.check()
+
+    def _show_update(self, latest: str, url: str) -> None:
+        notice = QLabel(
+            f'<a href="{html.escape(url)}">Nouvelle version {html.escape(latest)} disponible</a>'
+        )
+        notice.setOpenExternalLinks(True)
+        self.statusBar().addPermanentWidget(notice)
 
     # --- Toolbar ---------------------------------------------------------
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QUrl, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -32,6 +32,7 @@ from railcam.gui.progress import (
 )
 from railcam.gui.project import MIN_IMGSZ, MODEL_LABELS, Project, RenderOptions
 from railcam.gui.render import build_cli_args, format_cli_command, resolve_railcam_command
+from railcam.packaged import RUN_CLI_ENV, is_packaged
 
 
 class RenderProcess(QWidget):
@@ -56,6 +57,9 @@ class RenderProcess(QWidget):
         process = QProcess(self)
         process.setWorkingDirectory(str(working_dir))
         process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert(RUN_CLI_ENV, "1")
+        process.setProcessEnvironment(environment)
         process.readyReadStandardOutput.connect(self._on_output)
         process.finished.connect(self._on_finished)
         self._process = process
@@ -195,6 +199,9 @@ class RenderPanel(QWidget):
         copy_button.clicked.connect(self._copy_command)
         command_row.addWidget(copy_button)
         layout.addLayout(command_row)
+        # No railcam command exists on the PATH of a packaged installation
+        self.command_edit.setVisible(not is_packaged())
+        copy_button.setVisible(not is_packaged())
 
         action_row = QHBoxLayout()
         self.render_button = QPushButton("▶ Générer la vidéo")

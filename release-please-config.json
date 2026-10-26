@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "deace955578c33b58d4b46ec528e749a237d2bd7",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "railcam",
+      "include-component-in-tag": false,
+      "extra-files": ["src/railcam/__init__.py"]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+Railcam installers
+==================
+
+The railcam source code is released under the MIT License.
+
+These installers bundle Ultralytics YOLOv8 and its pose model weights, which
+are licensed under the GNU Affero General Public License v3.0. The installers
+are therefore distributed as a whole under the AGPL-3.0 (see
+LICENSE-AGPL-3.0.txt). The complete corresponding source code is available at:
+
+    https://github.com/AL-Escalade/railcam
+
+Bundled third-party components and their licenses:
+
+- Python                    PSF License
+- Ultralytics (YOLOv8)      AGPL-3.0             https://github.com/ultralytics/ultralytics
+- YOLOv8 pose weights       AGPL-3.0             https://github.com/ultralytics/assets
+- PyTorch, torchvision      BSD-3-Clause         https://github.com/pytorch/pytorch
+- Qt for Python (PySide6)   LGPL-3.0             https://code.qt.io/cgit/pyside/pyside-setup.git
+- OpenCV                    Apache-2.0           https://github.com/opencv/opencv
+- FFmpeg (imageio-ffmpeg)   GPL-3.0              https://github.com/imageio/imageio-ffmpeg
+- NumPy                     BSD-3-Clause         https://github.com/numpy/numpy
+- Pillow                    MIT-CMU              https://github.com/python-pillow/Pillow
+- DejaVu fonts              Bitstream Vera       https://dejavu-fonts.github.io
+
+Each component's own license text is shipped in its package metadata
+(`*.dist-info` directories) inside the application.
