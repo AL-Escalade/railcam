@@ -209,6 +209,8 @@ class PlayerWidget(QFrame):
         self.move_right_button.clicked.connect(lambda: self.moveRequested.emit(1))
         self.title = QLabel()
         self.title.setObjectName("playerTitle")
+        # Long file names are clipped rather than widening every player of the row
+        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.info = QLabel()
         self.info.setObjectName("playerMeta")
         replace = self._header_button("⇄", "Remplacer par un autre fichier")
@@ -217,8 +219,7 @@ class PlayerWidget(QFrame):
         remove.clicked.connect(self.removeRequested.emit)
         header.addWidget(self.move_left_button)
         header.addWidget(self.move_right_button)
-        header.addWidget(self.title)
-        header.addStretch()
+        header.addWidget(self.title, stretch=1)
         header.addWidget(self.info)
         header.addWidget(replace)
         header.addWidget(remove)
@@ -266,18 +267,22 @@ class PlayerWidget(QFrame):
         range_row.addWidget(self.end_button)
         range_row.addWidget(self.range_label)
         range_row.addStretch()
-        range_row.addWidget(QLabel("Légende :"))
+
+        settings_row = QHBoxLayout()
+
+        labels_row = QHBoxLayout()
+        labels_row.addWidget(QLabel("Légende :"))
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("Nom affiché sous la vidéo")
         self.label_edit.setToolTip("Texte affiché sous l'image dans la vidéo rendue")
         self.label_edit.textChanged.connect(lambda _: self.stateChanged.emit())
-        range_row.addWidget(self.label_edit)
-        range_row.addWidget(QLabel("Sous-légende :"))
+        labels_row.addWidget(self.label_edit)
+        labels_row.addWidget(QLabel("Sous-légende :"))
         self.sublabel_edit = QLineEdit()
         self.sublabel_edit.setPlaceholderText("Temps, catégorie…")
         self.sublabel_edit.setToolTip("Seconde ligne, affichée sous la légende en plus petit")
         self.sublabel_edit.textChanged.connect(lambda _: self.stateChanged.emit())
-        range_row.addWidget(self.sublabel_edit)
+        labels_row.addWidget(self.sublabel_edit)
         self.slowmo_spin = FactorSpinBox()
         self.slowmo_spin.setPrefix("Ralenti ×")
         self.slowmo_spin.setRange(SLOWMO_MIN, SLOWMO_MAX)
@@ -286,14 +291,17 @@ class PlayerWidget(QFrame):
         self.slowmo_spin.setValue(1.0)
         self.slowmo_spin.setToolTip("Facteur de ralenti : 2 = filmée 2× plus lentement que le réel")
         self.slowmo_spin.valueChanged.connect(self._on_slowmo_changed)
-        range_row.addWidget(self.slowmo_spin)
-        range_row.addWidget(QLabel("Grimpeur :"))
+        settings_row.addWidget(self.slowmo_spin)
+        settings_row.addWidget(QLabel("Grimpeur :"))
         self.climber_combo = QComboBox()
         for value, label in CLIMBER_LABELS:
             self.climber_combo.addItem(label, userData=value)
         self.climber_combo.currentIndexChanged.connect(lambda _: self.stateChanged.emit())
-        range_row.addWidget(self.climber_combo)
+        settings_row.addWidget(self.climber_combo)
+        settings_row.addStretch()
         layout.addLayout(range_row)
+        layout.addLayout(settings_row)
+        layout.addLayout(labels_row)
 
         self._refresh_header()
         self._refresh_labels()
@@ -301,6 +309,7 @@ class PlayerWidget(QFrame):
     def _refresh_header(self) -> None:
         meta = self.source.metadata
         self.title.setText(meta.path.name)
+        self.title.setToolTip(str(meta.path))
         fps = f"{meta.fps:.4g} fps"
         if self.slowmo != 1.0:
             fps += f" (réel {real_fps(meta.fps, self.slowmo):.4g})"
