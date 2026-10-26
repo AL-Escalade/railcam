@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/AL-Escalade/railcam/compare/v1.1.0...v1.2.0) (2026-10-26)
+
+
+### Features
+
+* add an app icon ([#17](https://github.com/AL-Escalade/railcam/issues/17)) ([57a7e17](https://github.com/AL-Escalade/railcam/commit/57a7e1758c32c3d6bb20687070d84b30ce5ffeba))
+
 ## [1.1.0](https://github.com/AL-Escalade/railcam/compare/v1.0.0...v1.1.0) (2026-10-26)
 
 
