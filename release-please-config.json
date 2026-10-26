@@ -5,7 +5,6 @@
     ".": {
       "release-type": "python",
       "package-name": "railcam",
-      "release-as": "1.0.0",
       "include-component-in-tag": false,
       "extra-files": ["src/railcam/__init__.py"]
     }

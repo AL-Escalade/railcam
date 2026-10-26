@@ -6,7 +6,7 @@ FFmpeg on `PATH` (`output.py`) and lets Ultralytics fetch weights on first use
 
 ## Goals / Non-Goals
 
-- Goals: installers for macOS, Windows, Linux (AppImage + Flatpak) built and
+- Goals: installers for macOS, Windows, Linux (Flatpak) built and
   released automatically from Conventional Commits; offline first render;
   update notification.
 - Non-Goals: Flathub publication (follow-up), code signing, silent auto-update, app stores, smaller model runtime
@@ -53,11 +53,14 @@ FFmpeg on `PATH` (`output.py`) and lets Ultralytics fetch weights on first use
   allows squash merges, so the PR title is the commit release-please reads.
   The squash title setting is switched from "commit or PR title" to "PR title"
   so a single-commit PR cannot bypass the lint.
+- **No AppImage**: Briefcase supports it best-effort only, cannot use binary
+  wheels (torch) and has known PySide issues; its CI build failed.
 - **Flatpak as a bundle** (`.flatpak` attached to the release, via Briefcase):
   it gets the same update notice as other formats. Flathub would give native
   updates but needs a source-built manifest and a review; out of scope here.
-- **First release is `1.0.0`**: forced with `release-as` in the release-please
-  config, removed once released so later versions follow the commits. Commits
+- **First release is `1.0.0`**: forced with a `Release-As: 1.0.0` footer on the
+  squashed commit, which applies once; a `release-as` config key would pin every
+  later release too. Commits
   before the bootstrap SHA are ignored.
 
 ## Risks / Trade-offs

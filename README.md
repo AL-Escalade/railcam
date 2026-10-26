@@ -71,7 +71,6 @@ Download the installer for your system from the
 |---|---|---|
 | macOS (Apple Silicon) | `.dmg` | The app is not signed: open it once, then *System Settings → Privacy & Security → Open Anyway* |
 | Windows | `.msi` | SmartScreen may warn about an unknown publisher: *More info → Run anyway* |
-| Linux | `.AppImage` | `chmod +x` the file, then run it |
 | Linux | `.flatpak` | `flatpak install --user <file>.flatpak` |
 
 The app tells you when a newer version is available.
@@ -108,6 +107,7 @@ Pull request titles follow [Conventional Commits](https://www.conventionalcommit
 (`feat: …`, `fix: …`, `feat!: …` for breaking changes), since they become the
 squashed commits on `main`. release-please keeps a release PR open with the next
 version and changelog; merging it publishes the release and its installers.
+To force a version, add a `Release-As: X.Y.Z` footer to the squashed commit.
 
 ---
 

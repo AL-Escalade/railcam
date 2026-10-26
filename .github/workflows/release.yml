@@ -46,12 +46,11 @@ jobs:
           - name: macOS
             os: macos-14
             command: briefcase package macOS app --adhoc-sign
+            executable: build/railcam/macos/app/Railcam.app/Contents/MacOS/Railcam
           - name: Windows
             os: windows-latest
             command: briefcase package windows app --adhoc-sign
-          - name: AppImage
-            os: ubuntu-latest
-            command: briefcase package linux appimage --adhoc-sign
+            executable: build/railcam/windows/app/src/Railcam.exe
           - name: Flatpak
             os: ubuntu-latest
             command: briefcase package linux flatpak --adhoc-sign
@@ -81,6 +80,10 @@ jobs:
           python -c "import hashlib, sys; d = hashlib.sha256(open('src/railcam/models/yolov8s-pose.pt', 'rb').read()).hexdigest(); sys.exit(d != '$POSE_WEIGHTS_SHA256')"
       - name: Package
         run: ${{ matrix.command }} --no-input
+      - name: Run the CLI through the packaged executable
+        if: matrix.executable
+        shell: bash
+        run: RAILCAM_RUN_CLI=1 "${{ matrix.executable }}" --version
       - name: Attach to the release
         if: needs.release-please.outputs.created == 'true'
         shell: bash

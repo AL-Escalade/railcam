@@ -1,6 +1,6 @@
 ## 1. Spike
 - [x] 1.1 Minimal Briefcase build on macOS: GUI opens, CLI dispatch via `RAILCAM_RUN_CLI` runs a render
-- [ ] 1.2 Same on Windows and Linux (AppImage and Flatpak) runners in CI
+- [ ] 1.2 Same on Windows and Linux (Flatpak) runners in CI; AppImage dropped
 
 ## 2. Packaged runtime
 - [x] 2.1 `app.main` dispatches to the CLI when `RAILCAM_RUN_CLI` is set
@@ -16,9 +16,8 @@
 ## 4. Release
 - [x] 4.1 Briefcase config in `pyproject.toml` (CPU-only torch, resources)
 - [ ] 4.9 App icon (Briefcase default for now)
-- [x] 4.2 release-please config (Python, `pyproject.toml`, `CHANGELOG.md`, bootstrap SHA, `release-as: 1.0.0`)
-- [ ] 4.8 After the 1.0.0 release, remove `release-as`
-- [x] 4.3 `release.yml`: release-please, then build matrix (dmg, msi, AppImage, flatpak) uploaded to the release
+- [x] 4.2 release-please config (Python, `pyproject.toml`, `CHANGELOG.md`, bootstrap SHA; `Release-As: 1.0.0` footer on the merge)
+- [x] 4.3 `release.yml`: release-please, then build matrix (dmg, msi, flatpak) with a packaged CLI smoke test uploaded to the release
 - [x] 4.4 `pr-title.yml`: Conventional Commits lint on PR titles
 - [ ] 4.5 Switch the repo squash commit title to "PR title" (with the user's go-ahead)
 - [x] 4.6 `LICENSE` (MIT), AGPL-3.0 text and third-party notices in installers

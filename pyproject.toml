@@ -100,5 +100,10 @@ universal_build = false
 [tool.briefcase.app.railcam.linux]
 requirement_installer_args = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]
 
+[tool.briefcase.app.railcam.linux.flatpak]
+flatpak_runtime = "org.freedesktop.Platform"
+flatpak_runtime_version = "25.08"
+flatpak_sdk = "org.freedesktop.Sdk"
+
 [tool.briefcase.app.railcam.windows]
 requirement_installer_args = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"]

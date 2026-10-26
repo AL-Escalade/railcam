@@ -3,14 +3,14 @@
 ### Requirement: Desktop Installers
 
 The project SHALL publish railcam-gui installers for macOS (`.dmg`), Windows
-(`.msi`) and Linux (AppImage and Flatpak bundle) for each release, and each
+(`.msi`) and Linux (Flatpak bundle) for each release, and each
 installer SHALL contain everything needed to render without Python, FFmpeg or
 network access.
 
 #### Scenario: Installers attached to a release
 
 - **WHEN** a release `vX.Y.Z` is created
-- **THEN** CI SHALL attach the macOS, Windows, AppImage and Flatpak installers
+- **THEN** CI SHALL attach the macOS, Windows and Flatpak installers
   of version `X.Y.Z` to it
 
 #### Scenario: Offline first render

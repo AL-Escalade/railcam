@@ -9,7 +9,7 @@ double-click, and a way to learn that a newer version exists.
 ## What Changes
 
 - Build installers with Briefcase from the existing package: `.dmg` (macOS),
-  `.msi` (Windows), AppImage and Flatpak bundle (Linux).
+  `.msi` (Windows), Flatpak bundle (Linux).
 - Bundle everything a render needs: Python, PySide6, CPU-only torch, FFmpeg, and
   the default pose model weights, so the first render works offline.
 - Continuous delivery driven by Conventional Commits: release-please keeps a

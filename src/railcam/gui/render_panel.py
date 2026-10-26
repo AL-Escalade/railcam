@@ -32,7 +32,7 @@ from railcam.gui.progress import (
 )
 from railcam.gui.project import MIN_IMGSZ, MODEL_LABELS, Project, RenderOptions
 from railcam.gui.render import build_cli_args, format_cli_command, resolve_railcam_command
-from railcam.packaged import RUN_CLI_ENV
+from railcam.packaged import RUN_CLI_ENV, is_packaged
 
 
 class RenderProcess(QWidget):
@@ -199,6 +199,9 @@ class RenderPanel(QWidget):
         copy_button.clicked.connect(self._copy_command)
         command_row.addWidget(copy_button)
         layout.addLayout(command_row)
+        # No railcam command exists on the PATH of a packaged installation
+        self.command_edit.setVisible(not is_packaged())
+        copy_button.setVisible(not is_packaged())
 
         action_row = QHBoxLayout()
         self.render_button = QPushButton("▶ Générer la vidéo")
