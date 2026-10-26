@@ -77,7 +77,7 @@ pythonpath = ["src"]
 
 [tool.briefcase]
 project_name = "Railcam"
-bundle = "io.github.al_escalade"
+bundle = "io.github.alescalade"
 
 [tool.briefcase.app.railcam]
 formal_name = "Railcam"
